@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAsset Club - Trading Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e27;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px 0;
+            border-bottom: 2px solid #00ff88;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            color: #00ff88;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #888;
+            font-size: 1.1em;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #1a1f3a 0%, #16213e 100%);
+            border: 1px solid #00ff88;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .metric-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            color: #00ff88;
+            font-weight: bold;
+        }
+        
+        .positive {
+            color: #00ff88;
+        }
+        
+        .negative {
+            color: #ff4444;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section-title {
+            font-size: 1.5em;
+            color: #00ff88;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #00ff88;
+            padding-bottom: 10px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: linear-gradient(135deg, #1a1f3a 0%, #16213e 100%);
+            border: 1px solid #00ff88;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        th {
+            background: #0f1729;
+            color: #00ff88;
+            padding: 15px;
+            text-align: left;
+            border-bottom: 2px solid #00ff88;
+        }
+        
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #333;
+        }
+        
+        tr:hover {
+            background: rgba(0, 255, 136, 0.05);
+        }
+        
+        .status-active {
+            color: #00ff88;
+            font-weight: bold;
+        }
+        
+        .status-inactive {
+            color: #ff4444;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+            color: #666;
+        }
+        
+        .refresh-time {
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 OpenAsset Club</h1>
+            <p class="subtitle">Professional Trading Dashboard</p>
+        </header>
+        
+        <div class="section">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Total Balance</div>
+                    <div class="metric-value">$10,250.00</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-label">Total P&L</div>
+                    <div class="metric-value positive">+$2,150.50</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-label">Win Rate</div>
+                    <div class="metric-value">68%</div>
+                </div>
+                
+                <div class="metric-card">
+                    <div class="metric-label">Open Trades</div>
+                    <div class="metric-value">3</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">📊 Active Bots</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Bot Name</th>
+                        <th>Exchange</th>
+                        <th>Status</th>
+                        <th>Balance</th>
+                        <th>P&L Today</th>
+                        <th>Win Rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>BTBOT</td>
+                        <td>Binance</td>
+                        <td class="status-active">Active</td>
+                        <td>$5,000</td>
+                        <td class="positive">+$125.50</td>
+                        <td>65%</td>
+                    </tr>
+                    <tr>
+                        <td>ATBOT</td>
+                        <td>Alpaca</td>
+                        <td class="status-active">Active</td>
+                        <td>$3,250</td>
+                        <td class="positive">+$85.00</td>
+                        <td>70%</td>
+                    </tr>
+                    <tr>
+                        <td>ETBOT</td>
+                        <td>eToro</td>
+                        <td class="status-inactive">Inactive</td>
+                        <td>$2,000</td>
+                        <td class="negative">-$20.00</td>
+                        <td>55%</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2 class="section-title">📈 Recent Trades</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Bot</th>
+                        <th>Symbol</th>
+                        <th>Action</th>
+                        <th>Price</th>
+                        <th>Quantity</th>
+                        <th>Exchange</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>2026-05-27 14:35</td>
+                        <td>BTBOT</td>
+                        <td>BTCUSDT</td>
+                        <td>BUY</td>
+                        <td>$42,500</td>
+                        <td>0.05</td>
+                        <td>Binance</td>
+                    </tr>
+                    <tr>
+                        <td>2026-05-27 13:50</td>
+                        <td>ATBOT</td>
+                        <td>AAPL</td>
+                        <td>SELL</td>
+                        <td>$205.75</td>
+                        <td>10</td>
+                        <td>Alpaca</td>
+                    </tr>
+                    <tr>
+                        <td>2026-05-27 12:15</td>
+                        <td>BTBOT</td>
+                        <td>ETHUSDT</td>
+                        <td>BUY</td>
+                        <td>$2,150</td>
+                        <td>0.5</td>
+                        <td>Binance</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <p>🤖 OpenAsset Club Trading Platform</p>
+            <p>💰 Receive payments in Bitcoin, Ethereum, USDT, BNB</p>
+            <div class="refresh-time">Last updated: <span id="update-time">Loading...</span></div>
+        </div>
+    </div>
+    
+    <script>
+        // Update timestamp
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('update-time').textContent = now.toLocaleString();
+        }
+        
+        updateTime();
+        setInterval(updateTime, 60000); // Update every minute
+    </script>
+</body>
+</html>

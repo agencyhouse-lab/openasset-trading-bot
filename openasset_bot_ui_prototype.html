@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAsset Trading Bot - UI Design</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #0A0E27;
+            color: #FFFFFF;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 360px;
+            margin: 0 auto;
+            background: #0A0E27;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+        }
+
+        .header {
+            background: linear-gradient(135deg, #00FF5F 0%, #00DD5F 100%);
+            padding: 16px;
+            color: #0A0E27;
+            text-align: center;
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-title {
+            flex: 1;
+            text-align: center;
+        }
+
+        .header-icon {
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .screen {
+            padding: 16px;
+            min-height: 600px;
+            display: none;
+        }
+
+        .screen.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Balance Card */
+        .balance-card {
+            background: linear-gradient(135deg, #1A1F3A 0%, #2A3F5F 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            text-align: center;
+            border: 1px solid #00FF5F33;
+        }
+
+        .balance-label {
+            color: #B0B8C8;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .balance-amount {
+            font-size: 36px;
+            font-weight: bold;
+            color: #00FF5F;
+            margin-bottom: 12px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .balance-sub {
+            display: flex;
+            justify-content: space-around;
+            font-size: 12px;
+            color: #B0B8C8;
+            gap: 8px;
+        }
+
+        .balance-sub span {
+            flex: 1;
+        }
+
+        /* Buttons */
+        .button-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .button {
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .button-primary {
+            background: #00FF5F;
+            color: #0A0E27;
+            grid-column: 1 / -1;
+        }
+
+        .button-primary:hover {
+            background: #00DD5F;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 255, 95, 0.3);
+        }
+
+        .button-secondary {
+            background: #2A3F5F;
+            color: #FFFFFF;
+            border: 1px solid #00FF5F33;
+        }
+
+        .button-secondary:hover {
+            background: #3A4F7F;
+            border-color: #00FF5F66;
+        }
+
+        .button-danger {
+            background: #FF4444;
+            color: #FFFFFF;
+        }
+
+        .button-danger:hover {
+            background: #DD3333;
+        }
+
+        .button-success {
+            background: #00FF5F;
+            color: #0A0E27;
+        }
+
+        /* Tab Navigation */
+        .tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .tab-button {
+            padding: 8px;
+            background: #2A3F5F;
+            color: #B0B8C8;
+            border: none;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .tab-button.active {
+            background: #00FF5F;
+            color: #0A0E27;
+            font-weight: bold;
+        }
+
+        /* Trading Card */
+        .trade-card {
+            background: #1A1F3A;
+            border: 1px solid #2A3F5F;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .trade-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .trade-symbol {
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .trade-status {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #00FF5F22;
+            color: #00FF5F;
+        }
+
+        .trade-status.loss {
+            background: #FF444422;
+            color: #FF4444;
+        }
+
+        .trade-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #B0B8C8;
+            margin-bottom: 4px;
+        }
+
+        .trade-value {
+            color: #FFFFFF;
+            font-weight: 500;
+        }
+
+        .trade-pnl {
+            color: #00FF5F;
+        }
+
+        .trade-pnl.negative {
+            color: #FF4444;
+        }
+
+        /* Stats Box */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .stat-box {
+            background: #1A1F3A;
+            border: 1px solid #2A3F5F;
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #B0B8C8;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #00FF5F;
+        }
+
+        .stat-value.negative {
+            color: #FF4444;
+        }
+
+        /* Navigation */
+        .nav {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            background: #1A1F3A;
+            border-top: 1px solid #2A3F5F;
+            padding: 12px 0;
+            margin-top: 16px;
+        }
+
+        .nav-item {
+            flex: 1;
+            text-align: center;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            color: #B0B8C8;
+        }
+
+        .nav-item.active {
+            background: #00FF5F22;
+            color: #00FF5F;
+        }
+
+        .nav-item:hover {
+            color: #00FF5F;
+        }
+
+        /* Chart */
+        .chart-container {
+            background: #1A1F3A;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid #2A3F5F;
+        }
+
+        .chart {
+            height: 180px;
+            background: linear-gradient(180deg, #00FF5F22 0%, transparent 100%);
+            border-radius: 8px;
+            position: relative;
+            margin-bottom: 8px;
+        }
+
+        .chart-line {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #00FF5F;
+            border-radius: 1px;
+            bottom: 40%;
+            box-shadow: 0 0 20px rgba(0, 255, 95, 0.5);
+        }
+
+        .chart-value {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #B0B8C8;
+        }
+
+        /* Notification Badge */
+        .badge {
+            display: inline-block;
+            background: #00FF5F;
+            color: #0A0E27;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        /* Input Style */
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        .input-label {
+            font-size: 12px;
+            color: #B0B8C8;
+            margin-bottom: 6px;
+            display: block;
+            text-transform: uppercase;
+        }
+
+        .input-field {
+            width: 100%;
+            background: #1A1F3A;
+            border: 1px solid #2A3F5F;
+            border-radius: 6px;
+            padding: 10px;
+            color: #FFFFFF;
+            font-size: 14px;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: #00FF5F;
+            box-shadow: 0 0 10px rgba(0, 255, 95, 0.2);
+        }
+
+        /* Alert */
+        .alert {
+            background: #FF444422;
+            border-left: 3px solid #FF4444;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            color: #FFB8B8;
+        }
+
+        .alert.success {
+            background: #00FF5F22;
+            border-left-color: #00FF5F;
+            color: #B8FFD0;
+        }
+
+        .alert.info {
+            background: #FFB80022;
+            border-left-color: #FFB800;
+            color: #FFD9B8;
+        }
+
+        /* Modal/Overlay */
+        .back-button {
+            cursor: pointer;
+            font-size: 18px;
+            padding: 8px;
+        }
+
+        .section-title {
+            font-size: 13px;
+            text-transform: uppercase;
+            color: #B0B8C8;
+            margin: 16px 0 12px 0;
+            letter-spacing: 1px;
+        }
+
+        .divider {
+            height: 1px;
+            background: #2A3F5F;
+            margin: 12px 0;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .container {
+                max-width: 100%;
+                border-radius: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- SCREEN 1: HOME DASHBOARD -->
+        <div class="screen active" id="home">
+            <div class="header">
+                <span>←</span>
+                <span class="header-title">OPENASSET</span>
+                <span>⚙️</span>
+            </div>
+
+            <div class="screen">
+                <div class="balance-card">
+                    <div class="balance-label">💰 Your Balance</div>
+                    <div class="balance-amount">$2,450.00</div>
+                    <div class="balance-sub">
+                        <span>BTC: 0.05</span>
+                        <span>ETH: 1.2</span>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="button button-primary" onclick="showScreen('auto-trade')">🤖 Auto Trade</button>
+                    <button class="button button-primary" onclick="showScreen('manual-trade')">👆 Manual Trade</button>
+                </div>
+
+                <div class="balance-card" style="background: linear-gradient(135deg, #1A3F1A 0%, #2A5F2A 100%); border-color: #00FF5F33;">
+                    <div class="balance-label">📈 Today Performance</div>
+                    <div style="color: #00FF5F; font-size: 24px; font-weight: bold; margin: 8px 0;">+1.23%</div>
+                    <div style="color: #B0B8C8; font-size: 12px;">P&L: +$30.00</div>
+                </div>
+
+                <div class="section-title">🟢 Open Positions (3)</div>
+                
+                <div class="trade-card">
+                    <div class="trade-header">
+                        <span class="trade-symbol">BTCUSDT</span>
+                        <span class="trade-status">📊 Open</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>Entry:</span>
+                        <span class="trade-value">$45,000</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>Current:</span>
+                        <span class="trade-value">$45,500</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>P&L:</span>
+                        <span class="trade-pnl">+0.5% (+$250)</span>
+                    </div>
+                </div>
+
+                <div class="trade-card">
+                    <div class="trade-header">
+                        <span class="trade-symbol">ETHUSDT</span>
+                        <span class="trade-status">📊 Open</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>Entry:</span>
+                        <span class="trade-value">$2,050</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>Current:</span>
+                        <span class="trade-value">$2,080</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>P&L:</span>
+                        <span class="trade-pnl">+1.46% (+$30)</span>
+                    </div>
+                </div>
+
+                <div class="trade-card">
+                    <div class="trade-header">
+                        <span class="trade-symbol">BNBUSDT</span>
+                        <span class="trade-status loss">⚠️ Monitoring</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>Entry:</span>
+                        <span class="trade-value">$650</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>Current:</span>
+                        <span class="trade-value">$648</span>
+                    </div>
+                    <div class="trade-row">
+                        <span>P&L:</span>
+                        <span class="trade-pnl negative">-0.31% (-$13)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN 2: AUTO TRADING -->
+        <div class="screen" id="auto-trade">
+            <div class="header">
+                <span class="back-button" onclick="showScreen('home')">←</span>
+                <span class="header-title">AUTO TRADING</span>
+                <span>⚙️</span>
+            </div>
+
+            <div class="screen">
+                <div class="balance-card" style="background: linear-gradient(135deg, #1A3F1A 0%, #2A5F2A 100%); border-color: #00FF5F33;">
+                    <div class="balance-label">🤖 Bot Status</div>
+                    <div style="font-size: 20px; margin: 8px 0;">🟢 ACTIVE</div>
+                    <div style="color: #B0B8C8; font-size: 12px;">Trading 24/7</div>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart">
+                        <div class="chart-line"></div>
+                    </div>
+                    <div class="chart-value">
+                        <span>24h Return: +2.34%</span>
+                    </div>
+                </div>
+
+                <div class="section-title">⚙️ Settings</div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Frequency</div>
+                        <div class="stat-value">5 min</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Max Loss</div>
+                        <div class="stat-value">0.5%</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Take Profit</div>
+                        <div class="stat-value">3-5%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Max Trades</div>
+                        <div class="stat-value">3</div>
+                    </div>
+                </div>
+
+                <div class="section-title">📊 Statistics</div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Win Rate</div>
+                        <div class="stat-value">83.7%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Profit Factor</div>
+                        <div class="stat-value">2.24x</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Total Trades</div>
+                        <div class="stat-value">54</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Total P&L</div>
+                        <div class="stat-value">+$850</div>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="button button-primary">🚀 Start</button>
+                    <button class="button button-danger">⏸️ Pause</button>
+                </div>
+
+                <button class="button button-secondary" onclick="showScreen('home')" style="width: 100%;">⚙️ Configure</button>
+            </div>
+        </div>
+
+        <!-- SCREEN 3: MANUAL TRADING -->
+        <div class="screen" id="manual-trade">
+            <div class="header">
+                <span class="back-button" onclick="showScreen('home')">←</span>
+                <span class="header-title">MANUAL TRADE</span>
+                <span>⚙️</span>
+            </div>
+
+            <div class="screen">
+                <div class="balance-card">
+                    <div class="balance-label">Select Trading Pair</div>
+                    <div style="font-size: 18px; margin: 12px 0;">📊 Market Data</div>
+                    <div style="color: #B0B8C8; font-size: 11px;">Popular pairs below</div>
+                </div>
+
+                <div class="button-group" style="grid-template-columns: 1fr; gap: 8px;">
+                    <button class="button button-secondary" onclick="showScreen('trading-details')">📈 BTCUSDT - $45,936</button>
+                    <button class="button button-secondary" onclick="showScreen('trading-details')">📈 ETHUSDT - $2,080</button>
+                    <button class="button button-secondary" onclick="showScreen('trading-details')">📈 BNBUSDT - $644</button>
+                    <button class="button button-secondary" onclick="showScreen('trading-details')">📈 SOLUSDT - $148</button>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">Or enter custom symbol</label>
+                    <input class="input-field" type="text" placeholder="e.g., ADAUSDT">
+                </div>
+
+                <div class="section-title">⚡ Quick Trade</div>
+
+                <div class="tabs">
+                    <button class="tab-button active">Market</button>
+                    <button class="tab-button">Limit</button>
+                    <button class="tab-button">Buy</button>
+                    <button class="tab-button">Sell</button>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">Quantity (BTC)</label>
+                    <input class="input-field" type="number" placeholder="0.01" value="0.01">
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Risk</div>
+                        <div class="stat-value">$10.80</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Reward</div>
+                        <div class="stat-value">$46.07</div>
+                    </div>
+                </div>
+
+                <button class="button button-primary">✅ Execute Trade</button>
+            </div>
+        </div>
+
+        <!-- SCREEN 4: TRADING DETAILS -->
+        <div class="screen" id="trading-details">
+            <div class="header">
+                <span class="back-button" onclick="showScreen('manual-trade')">←</span>
+                <span class="header-title">BTCUSDT</span>
+                <span>⚙️</span>
+            </div>
+
+            <div class="screen">
+                <div class="balance-card">
+                    <div class="balance-label">Current Price</div>
+                    <div class="balance-amount" style="font-size: 28px;">$45,936.72</div>
+                    <div class="balance-sub">
+                        <span>24h High: $46,500</span>
+                        <span>24h Low: $44,800</span>
+                    </div>
+                </div>
+
+                <div class="balance-card" style="background: linear-gradient(135deg, #1A2F3A 0%, #2A4F5F 100%); border-color: #FFB80033;">
+                    <div class="balance-label">📊 24h Change</div>
+                    <div style="font-size: 24px; color: #00FF5F; font-weight: bold; margin: 8px 0;">+2.5%</div>
+                    <div style="color: #B0B8C8; font-size: 12px;">Volume: 25.3K BTC</div>
+                </div>
+
+                <div class="section-title">⚡ Execute Trade</div>
+
+                <div class="tabs" style="grid-template-columns: 1fr 1fr;">
+                    <button class="tab-button active">Market</button>
+                    <button class="tab-button">Limit</button>
+                </div>
+
+                <div class="tabs" style="grid-template-columns: 1fr 1fr;">
+                    <button class="tab-button active" style="background: #00FF5F; color: #0A0E27;">🟢 BUY</button>
+                    <button class="tab-button">🔴 SELL</button>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">Quantity</label>
+                    <input class="input-field" type="number" placeholder="0.01">
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Entry</div>
+                        <div class="stat-value" style="font-size: 14px;">$45,936.72</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Stop Loss</div>
+                        <div class="stat-value negative" style="font-size: 14px;">$45,719</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Take Profit</div>
+                        <div class="stat-value" style="font-size: 14px;">$47,315</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Risk/Reward</div>
+                        <div class="stat-value" style="font-size: 14px;">1:4.26</div>
+                    </div>
+                </div>
+
+                <button class="button button-primary">✅ Confirm Trade</button>
+                <button class="button button-secondary" onclick="showScreen('manual-trade')" style="width: 100%; margin-top: 8px;">❌ Cancel</button>
+            </div>
+        </div>
+
+        <!-- SCREEN 5: STATISTICS -->
+        <div class="screen" id="statistics">
+            <div class="header">
+                <span class="back-button" onclick="showScreen('home')">←</span>
+                <span class="header-title">STATISTICS</span>
+                <span>⚙️</span>
+            </div>
+
+            <div class="screen">
+                <div class="tabs">
+                    <button class="tab-button active">24h</button>
+                    <button class="tab-button">3d</button>
+                    <button class="tab-button">7d</button>
+                    <button class="tab-button">1m</button>
+                </div>
+
+                <div class="chart-container">
+                    <div class="chart">
+                        <div class="chart-line" style="bottom: 50%;"></div>
+                    </div>
+                    <div class="chart-value">
+                        <span>Return: +3.45%</span>
+                    </div>
+                </div>
+
+                <div class="section-title">📊 Performance</div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Total Trades</div>
+                        <div class="stat-value">54</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Win Rate</div>
+                        <div class="stat-value">57.4%</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Profit Factor</div>
+                        <div class="stat-value">2.24x</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Total P&L</div>
+                        <div class="stat-value">+$1,248</div>
+                    </div>
+                </div>
+
+                <div class="section-title">💰 Trade Quality</div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Avg Win</div>
+                        <div class="stat-value">+$42.30</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Avg Loss</div>
+                        <div class="stat-value negative">-$18.90</div>
+                    </div>
+                </div>
+
+                <div class="section-title">⏱️ Trade Timing</div>
+
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Avg Duration</div>
+                        <div class="stat-value" style="font-size: 14px;">15 min</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Longest</div>
+                        <div class="stat-value" style="font-size: 14px;">2h 30m</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SCREEN 6: SETTINGS -->
+        <div class="screen" id="settings">
+            <div class="header">
+                <span class="back-button" onclick="showScreen('home')">←</span>
+                <span class="header-title">SETTINGS</span>
+                <span>⚙️</span>
+            </div>
+
+            <div class="screen">
+                <div class="section-title">🔌 Connected Exchanges</div>
+
+                <div class="balance-card">
+                    <div style="text-align: left;">
+                        <div style="font-weight: bold; margin-bottom: 8px;">💰 BINANCE</div>
+                        <div style="font-size: 12px; color: #00FF5F; margin-bottom: 4px;">✅ Connected & Active</div>
+                        <div style="font-size: 11px; color: #B0B8C8;">Updated: 27.05.2026 19:47</div>
+                    </div>
+                </div>
+
+                <div class="button-group" style="grid-template-columns: 1fr 1fr;">
+                    <button class="button button-secondary">Edit</button>
+                    <button class="button button-danger">Disconnect</button>
+                </div>
+
+                <div class="balance-card" style="background: #3F2A1A; border-color: #FFB80033;">
+                    <div style="text-align: left;">
+                        <div style="font-weight: bold; margin-bottom: 8px;">📈 ALPACA (Stocks)</div>
+                        <div style="font-size: 12px; color: #FFB800; margin-bottom: 4px;">⚠️ Need Setup</div>
+                        <div style="font-size: 11px; color: #B0B8C8;">Connect API to start trading</div>
+                    </div>
+                </div>
+
+                <button class="button button-secondary" style="width: 100%;">Add API Key</button>
+
+                <div class="section-title">🔔 Notifications</div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #1A1F3A; border-radius: 8px; margin-bottom: 8px;">
+                    <span>Trade Alerts</span>
+                    <input type="checkbox" checked style="width: 20px; height: 20px; cursor: pointer;">
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #1A1F3A; border-radius: 8px; margin-bottom: 8px;">
+                    <span>Daily Report</span>
+                    <input type="checkbox" checked style="width: 20px; height: 20px; cursor: pointer;">
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #1A1F3A; border-radius: 8px; margin-bottom: 16px;">
+                    <span>Loss Alert</span>
+                    <input type="checkbox" checked style="width: 20px; height: 20px; cursor: pointer;">
+                </div>
+
+                <button class="button button-primary">💾 Save Changes</button>
+            </div>
+        </div>
+
+        <!-- Navigation Footer -->
+        <div class="nav">
+            <div class="nav-item active" onclick="showScreen('home')">🏠</div>
+            <div class="nav-item" onclick="showScreen('statistics')">📊</div>
+            <div class="nav-item" onclick="showScreen('auto-trade')">🤖</div>
+            <div class="nav-item" onclick="showScreen('settings')">⚙️</div>
+        </div>
+    </div>
+
+    <script>
+        function showScreen(screenId) {
+            // Hide all screens
+            const screens = document.querySelectorAll('.screen');
+            screens.forEach(screen => screen.classList.remove('active'));
+
+            // Show selected screen
+            const selectedScreen = document.getElementById(screenId);
+            if (selectedScreen) {
+                selectedScreen.classList.add('active');
+            }
+
+            // Update nav items
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => item.classList.remove('active'));
+            
+            // Highlight active nav
+            if (screenId === 'home') navItems[0].classList.add('active');
+            if (screenId === 'statistics') navItems[1].classList.add('active');
+            if (screenId === 'auto-trade') navItems[2].classList.add('active');
+            if (screenId === 'settings') navItems[3].classList.add('active');
+        }
+    </script>
+</body>
+</html>
