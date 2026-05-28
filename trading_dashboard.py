@@ -1,27 +1,20 @@
 #!/usr/bin/env python3
 """
-OpenAsset Trading Dashboard — Binance (crypto) + Alpaca (stocks)
-================================================================
-
-Routing by asset class:
-  * Crypto  (BTC/ETH/BNB/SOL)  → Binance  — real orders in Live Mode
-  * Stocks  (SPY/QQQ/GLD/USO/IWM/DIA) → Alpaca — paper account (safe)
-  * Unknown → demo stub
-
-Home/menu buttons use the host bot's real callbacks:
-  * back_home     (host bot main menu)
-  * trading_menu  (host bot platform selection)
+OpenAsset Trading Dashboard
+===========================
+Binance (crypto) + Alpaca (stocks), with:
+  * Bulletproof home button (own callback, no host dependency)
+  * Trade pause/resume per platform + STOP ALL emergency
+  * Safe defaults: 0.5% SL, 3% TP (1:6 R/R), 1% risk, $50 cap
+  * Trading psychology / rules screen
 """
 
-import os
-import json
-import logging
+import os, json, logging
 from datetime import datetime, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-# ── Binance ──
 try:
     from binance_client import (
         BinanceClient, get_client_for_user as get_binance_client,
@@ -33,7 +26,6 @@ except ImportError:
     BINANCE_LOADED = False
     MAX_USD_PER_TRADE = 50.0
 
-# ── Alpaca ──
 try:
     from alpaca_client import (
         get_client_for_user as get_alpaca_client,
@@ -45,29 +37,27 @@ except ImportError:
     ALPACA_LOADED = False
 
 logger = logging.getLogger(__name__)
-
 ADMIN_ID = 5587885687
 DB_PATH = "/root/openasset_club/telegram_bot/database"
 
+# Safe-by-default trading rules
+STOP_LOSS_PCT = 0.5   # %
+TAKE_PROFIT_PCT = 3.0  # %
+RISK_PCT = 1.0         # % of balance per trade
+
 TRADING_CALLBACK_PATTERN = (
-    r"^(td_home|td_auto|td_manual|td_market|td_history|"
-    r"td_stats|td_settings|mt_|exec_buy_|exec_sell_|"
-    r"confirm_buy_|confirm_sell_|bot_start|bot_config|"
-    r"settings_notif|settings_verify|settings_toggle_mode|"
-    r"settings_confirm_live)"
+    r"^(td_home|td_mainmenu|td_auto|td_manual|td_market|td_history|"
+    r"td_stats|td_settings|td_psychology|td_pause_|td_resume_|td_stopall|"
+    r"td_resumeall|mt_|exec_buy_|exec_sell_|confirm_buy_|confirm_sell_|"
+    r"bot_start|bot_config|settings_notif|settings_verify|"
+    r"settings_toggle_mode|settings_confirm_live)"
 )
 
 CRYPTO_SYMBOLS = {"BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD"}
 STOCK_SYMBOLS = {"SPY", "QQQ", "GLD", "USO", "IWM", "DIA"}
 
-# Fallback demo prices for stocks if Alpaca data unavailable
-DEMO_STOCKS = {
-    "SPY": "521.44", "QQQ": "442.10", "GLD": "231.75",
-    "USO": "74.20",  "IWM": "201.30", "DIA": "389.20",
-}
 
-
-# ─── HELPERS ─────────────────────────────────────────────────────────────────
+# ─── DB ──────────────────────────────────────────────────────────────────────
 def _load(name):
     try:
         with open(f"{DB_PATH}/{name}.json") as f:
@@ -82,6 +72,29 @@ def _save(name, data):
         json.dump(data, f, indent=2)
 
 
+def get_user_trades(uid):
+    return [t for t in _load("trades").values() if str(t.get("user_id")) == str(uid)]
+
+
+def is_paused(uid, platform):
+    return _load("accounts").get(str(uid), {}).get(platform, {}).get("paused", False) is True
+
+
+def set_paused(uid, platform, paused):
+    a = _load("accounts")
+    a.setdefault(str(uid), {}).setdefault(platform, {})["paused"] = bool(paused)
+    _save("accounts", a)
+
+
+def set_all_paused(uid, paused):
+    a = _load("accounts")
+    u = a.setdefault(str(uid), {})
+    for p in ("binance", "alpaca"):
+        u.setdefault(p, {})["paused"] = bool(paused)
+    _save("accounts", a)
+
+
+# ─── helpers ─────────────────────────────────────────────────────────────────
 def ts_now():
     return datetime.now(timezone.utc).strftime("%H:%M UTC")
 
@@ -90,15 +103,9 @@ def date_now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def get_user_trades(uid):
-    return [t for t in _load("trades").values()
-            if str(t.get("user_id")) == str(uid)]
-
-
 def kb(*rows):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(t, callback_data=d) for t, d in row]
-        for row in rows
+        [InlineKeyboardButton(t, callback_data=d) for t, d in row] for row in rows
     ])
 
 
@@ -133,26 +140,28 @@ def fmt_usd(n):
 
 
 def fmt_pct(n):
-    sign = "+" if n >= 0 else ""
-    return f"{sign}{n:.2f}%"
+    return f"{'+' if n >= 0 else ''}{n:.2f}%"
+
+
+def pause_icon(uid, platform):
+    return "⏸ Paused" if is_paused(uid, platform) else "🟢 Running"
 
 
 # ─── SCREEN 1: Trading Home ──────────────────────────────────────────────────
 def screen_trading_home(uid):
-    badge = mode_badge(uid)
-
     bn_line = "├ Binance: 🔗 not connected"
     if has_binance(uid):
         c = get_binance_client(uid)
         if c:
-            bn_line = f"├ Binance: 💰 {fmt_usd(c.get_balance('USDT'))} USDT"
+            bal = fmt_usd(c.get_balance("USDT"))
+            bn_line = f"├ Binance: 💰 {bal} · {pause_icon(uid,'binance')}"
 
     al_line = "└ Alpaca:  🔗 not connected"
     if has_alpaca(uid):
         c, paper = get_alpaca_client(uid)
         if c:
             tag = "paper" if paper else "live"
-            al_line = f"└ Alpaca:  💵 {fmt_usd(c.get_cash())} ({tag})"
+            al_line = f"└ Alpaca:  💵 {fmt_usd(c.get_cash())} ({tag}) · {pause_icon(uid,'alpaca')}"
 
     trades = get_user_trades(uid)
     open_t = [t for t in trades if t.get("status") == "OPEN"]
@@ -161,7 +170,7 @@ def screen_trading_home(uid):
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📊 *Trading Dashboard*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{badge}\n\n"
+        f"{mode_badge(uid)}\n\n"
         "💼 *Accounts*\n"
         f"{bn_line}\n"
         f"{al_line}\n\n"
@@ -173,34 +182,67 @@ def screen_trading_home(uid):
         [("🤖 Auto Trading", "td_auto"),    ("✏️ Manual Trade", "td_manual")],
         [("📈 Market Data",  "td_market"),  ("📋 Trade History","td_history")],
         [("📊 Statistics",   "td_stats"),   ("⚙️ Bot Settings", "td_settings")],
-        [("🏠 Main Menu",    "back_home")],
+        [("🧠 Trading Psychology", "td_psychology")],
+        [("🏠 Main Menu",    "td_mainmenu")],
     )
     return text, keyboard
 
 
-# ─── SCREEN 2: Auto Trading ──────────────────────────────────────────────────
+# ─── Main Menu (bulletproof — uses host's working callbacks) ─────────────────
+def screen_mainmenu(uid):
+    text = (
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🏠 *Main Menu*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Choose where to go:"
+    )
+    keyboard = kb(
+        [("📊 Trading Dashboard", "td_home")],
+        [("🤖 Trading Menu",      "trading_menu")],
+        [("💰 Balances",          "show_balances"),
+         ("📊 Positions",          "show_positions")],
+        [("📈 Statistics",         "show_stats"),
+         ("📖 User Guide",         "user_guide")],
+        [("❓ Help",               "show_help")],
+    )
+    return text, keyboard
+
+
+# ─── SCREEN 2: Auto Trading (with pause control) ─────────────────────────────
 def screen_auto(uid):
     open_t = [t for t in get_user_trades(uid) if t.get("status") == "OPEN"]
+    bn_state = "✅" if has_binance(uid) else "⚠️"
+    al_state = "✅" if has_alpaca(uid) else "⚠️"
+
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "🤖 *Auto Trading Bot*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{mode_badge(uid)}\n\n"
-        f"Binance: `{'✅' if has_binance(uid) else '⚠️ connect'}`\n"
-        f"Alpaca:  `{'✅' if has_alpaca(uid) else '⚠️ connect'}`\n"
-        f"Status:  `⬜ Standby`\n"
-        f"Open:    `{len(open_t)} positions`\n\n"
-        "⚙️ *Default Settings*\n"
-        "├ Risk/Trade: `1% of balance`\n"
-        f"├ Max/Trade:  `${MAX_USD_PER_TRADE} cap`\n"
-        "├ Stop Loss:  `2%`\n"
-        "└ Take Profit:`3%`\n\n"
-        "_Auto engine ships in Phase 4._\n"
-        "_For now use Manual Trade._"
+        "🔗 *Platform status*\n"
+        f"├ Binance: {bn_state} · {pause_icon(uid,'binance')}\n"
+        f"└ Alpaca:  {al_state} · {pause_icon(uid,'alpaca')}\n\n"
+        f"📈 Open positions: `{len(open_t)}`\n\n"
+        "🛡 *Safe Default Rules* (all platforms)\n"
+        f"├ Risk per trade:  `{RISK_PCT}% of balance`\n"
+        f"├ Max per trade:   `${MAX_USD_PER_TRADE}`\n"
+        f"├ Stop Loss:       `{STOP_LOSS_PCT}%` ← safety first\n"
+        f"├ Take Profit:     `{TAKE_PROFIT_PCT}%`\n"
+        f"└ Risk/Reward:     `1:6`\n\n"
+        "_Auto engine (background SL/TP)_\n_ships Phase 4. Today: pause controls_\n_and the rules are shown for manual use._"
     )
+
+    # Build pause/resume buttons
+    bn_btn = ("▶️ Resume Binance", "td_resume_binance") if is_paused(uid, "binance") \
+             else ("⏸ Pause Binance", "td_pause_binance")
+    al_btn = ("▶️ Resume Alpaca", "td_resume_alpaca") if is_paused(uid, "alpaca") \
+             else ("⏸ Pause Alpaca", "td_pause_alpaca")
+
     keyboard = kb(
+        [bn_btn, al_btn],
+        [("🛑 STOP ALL TRADING", "td_stopall")],
         [("📋 Open Trades", "td_history"), ("📊 Statistics", "td_stats")],
-        [("⬅️ Dashboard",   "td_home")],
+        [("⬅️ Dashboard", "td_home")],
     )
     return text, keyboard
 
@@ -212,7 +254,7 @@ def screen_manual():
         "✏️ *Manual Trading*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "🔶 *Crypto* — Binance (live in Live Mode)\n"
-        "📊 *Stocks* — Alpaca (paper, safe)\n\n"
+        "📊 *Stocks* — Alpaca\n\n"
         "Choose an asset:"
     )
     keyboard = kb(
@@ -220,7 +262,7 @@ def screen_manual():
         [("🟡 BNB/USD", "mt_BNBUSD"), ("◎ SOL/USD", "mt_SOLUSD")],
         [("📈 SPY",     "mt_SPY"),    ("📈 QQQ",    "mt_QQQ")],
         [("🥇 GLD",     "mt_GLD"),    ("⚫ USO",    "mt_USO")],
-        [("⬅️ Dashboard","td_home")],
+        [("⬅️ Dashboard", "td_home")],
     )
     return text, keyboard
 
@@ -230,51 +272,36 @@ def screen_trade_detail(symbol, uid):
     cls = asset_class(symbol)
     badge = mode_badge(uid)
 
-    # CRYPTO (Binance)
     if cls == "crypto":
-        if has_binance(uid):
-            c = get_binance_client(uid)
-            if c:
-                s = c.get_24h_stats(symbol)
-                p, hi, lo = fmt_usd(s["price"]), fmt_usd(s["high"]), fmt_usd(s["low"])
-                chg = fmt_pct(s["change_pct"])
-                arrow = "✅" if s["change_pct"] >= 0 else "❌"
-                tag = "🟢 LIVE · Binance"
-                usdt = c.get_balance("USDT")
-                size = calc_trade_size_usd(usdt)
-                size_line = f"\n💵 Trade size: `{fmt_usd(size)}` _(1%, capped)_"
-                buttons = kb(
-                    [("🟢 BUY", f"exec_buy_{symbol}"), ("🔴 SELL", f"exec_sell_{symbol}")],
-                    [("⬅️ Back", "td_manual")],
-                )
-            else:
-                return ("⚠️ Binance client error.", kb([("⬅️ Back", "td_manual")]))
-        else:
+        if not has_binance(uid):
             return ("🔗 Connect Binance first (Trading Menu → Binance).",
                     kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_manual")]))
+        c = get_binance_client(uid)
+        if not c:
+            return ("⚠️ Binance client error.", kb([("⬅️ Back", "td_manual")]))
+        s = c.get_24h_stats(symbol)
+        p, hi, lo = fmt_usd(s["price"]), fmt_usd(s["high"]), fmt_usd(s["low"])
+        chg = fmt_pct(s["change_pct"])
+        arrow = "✅" if s["change_pct"] >= 0 else "❌"
+        tag = "🟢 LIVE · Binance"
+        usdt = c.get_balance("USDT")
+        size = calc_trade_size_usd(usdt)
+        paused_note = "\n⏸ _Binance paused — orders blocked_" if is_paused(uid, "binance") else ""
 
-    # STOCK (Alpaca)
     elif cls == "stock":
-        if has_alpaca(uid):
-            c, paper = get_alpaca_client(uid)
-            if c:
-                price = c.get_price(symbol)
-                p = fmt_usd(price) if price else f"${DEMO_STOCKS.get(symbol,'—')}"
-                hi = lo = "—"
-                chg, arrow = "—", "📊"
-                tag = f"🟢 LIVE · Alpaca {'(paper)' if paper else '(live)'}"
-                cash = c.get_cash()
-                size = alpaca_trade_size(cash)
-                size_line = f"\n💵 Trade size: `{fmt_usd(size)}` _(1%, capped)_"
-                buttons = kb(
-                    [("🟢 BUY", f"exec_buy_{symbol}"), ("🔴 SELL", f"exec_sell_{symbol}")],
-                    [("⬅️ Back", "td_manual")],
-                )
-            else:
-                return ("⚠️ Alpaca client error.", kb([("⬅️ Back", "td_manual")]))
-        else:
+        if not has_alpaca(uid):
             return ("🔗 Connect Alpaca first (Trading Menu → Alpaca).",
                     kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_manual")]))
+        c, paper = get_alpaca_client(uid)
+        if not c:
+            return ("⚠️ Alpaca client error.", kb([("⬅️ Back", "td_manual")]))
+        price = c.get_price(symbol)
+        p = fmt_usd(price) if price else "$—"
+        hi = lo = "—"; chg, arrow = "—", "📊"
+        tag = f"🟢 LIVE · Alpaca {'(paper)' if paper else '(live)'}"
+        cash = c.get_cash()
+        size = alpaca_trade_size(cash)
+        paused_note = "\n⏸ _Alpaca paused — orders blocked_" if is_paused(uid, "alpaca") else ""
     else:
         return ("⚠️ Unknown symbol.", kb([("⬅️ Back", "td_manual")]))
 
@@ -282,24 +309,25 @@ def screen_trade_detail(symbol, uid):
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 *{symbol}*  ·  `{tag}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{badge}\n\n"
-        f"💲 Price:     `{p}`\n"
-        f"⬆️  24h High: `{hi}`\n"
-        f"⬇️  24h Low:  `{lo}`\n"
-        f"📈 Change:    `{chg}` {arrow}"
-        f"{size_line}\n\n"
-        "🛡 *Risk Settings*\n"
-        "├ Risk:        `1% of balance`\n"
+        f"{badge}{paused_note}\n\n"
+        f"💲 Price:    `{p}`\n"
+        f"⬆️ 24h High: `{hi}`\n"
+        f"⬇️ 24h Low:  `{lo}`\n"
+        f"📈 Change:   `{chg}` {arrow}\n\n"
+        f"💵 Trade size: `{fmt_usd(size)}` _(1%, capped)_\n\n"
+        "🛡 *Safe Rules*\n"
         f"├ Max trade:   `${MAX_USD_PER_TRADE}`\n"
-        "├ Stop Loss:   `−2%`\n"
-        "└ Take Profit: `+3%`"
+        f"├ Stop Loss:   `−{STOP_LOSS_PCT}%`\n"
+        f"└ Take Profit: `+{TAKE_PROFIT_PCT}%`"
     )
-    return text, buttons
+    return text, kb(
+        [("🟢 BUY", f"exec_buy_{symbol}"), ("🔴 SELL", f"exec_sell_{symbol}")],
+        [("⬅️ Back", "td_manual")],
+    )
 
 
 # ─── SCREEN 5: Market Data ───────────────────────────────────────────────────
 def screen_market(uid):
-    # Crypto block
     if has_binance(uid):
         c = get_binance_client(uid)
         try:
@@ -318,18 +346,15 @@ def screen_market(uid):
     else:
         crypto = "🔶 *Crypto* `🔗 Connect Binance`\n\n"
 
-    # Stock block (Alpaca)
     if has_alpaca(uid):
-        c, paper = get_alpaca_client(uid)
+        c, _ = get_alpaca_client(uid)
         try:
-            spy = c.get_price("SPY"); qqq = c.get_price("QQQ")
-            gld = c.get_price("GLD"); uso = c.get_price("USO")
             stocks = (
-                f"📊 *Stocks* `🟢 LIVE · Alpaca`\n"
-                f"├ SPY `{fmt_usd(spy)}`\n"
-                f"├ QQQ `{fmt_usd(qqq)}`\n"
-                f"├ GLD `{fmt_usd(gld)}`\n"
-                f"└ USO `{fmt_usd(uso)}`\n\n"
+                "📊 *Stocks* `🟢 LIVE · Alpaca`\n"
+                f"├ SPY `{fmt_usd(c.get_price('SPY'))}`\n"
+                f"├ QQQ `{fmt_usd(c.get_price('QQQ'))}`\n"
+                f"├ GLD `{fmt_usd(c.get_price('GLD'))}`\n"
+                f"└ USO `{fmt_usd(c.get_price('USO'))}`\n\n"
             )
         except Exception as e:
             logger.warning(f"stock market: {e}")
@@ -341,20 +366,17 @@ def screen_market(uid):
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📈 *Market Data*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{crypto}{stocks}"
-        f"🕐 `{ts_now()}`"
+        f"{crypto}{stocks}🕐 `{ts_now()}`"
     )
-    keyboard = kb(
-        [("🔄 Refresh",   "td_market"), ("✏️ Trade Now", "td_manual")],
+    return text, kb(
+        [("🔄 Refresh", "td_market"), ("✏️ Trade Now", "td_manual")],
         [("⬅️ Dashboard", "td_home")],
     )
-    return text, keyboard
 
 
 # ─── SCREEN 6: Trade History ─────────────────────────────────────────────────
 def screen_history(uid):
-    trades = sorted(get_user_trades(uid),
-                    key=lambda x: x.get("created_at", ""), reverse=True)[:6]
+    trades = sorted(get_user_trades(uid), key=lambda x: x.get("created_at", ""), reverse=True)[:6]
     if not trades:
         body = "_No trades yet._\n\nStart with Manual Trade."
     else:
@@ -365,7 +387,7 @@ def screen_history(uid):
             icon = "✅" if pnl >= 0 else "❌"
             sign = "+" if pnl >= 0 else ""
             tag = {"LIVE": "🔴", "ALPACA": "📊", "PAPER": "🧪"}.get(mode, "🧪")
-            rows.append(f"{i}️⃣  {tag} {sym} · {side} {icon}  `{sign}{pnl:.2f}`")
+            rows.append(f"{i}️⃣ {tag} {sym} · {side} {icon}  `{sign}{pnl:.2f}`")
         body = "\n\n".join(rows)
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -374,11 +396,10 @@ def screen_history(uid):
         f"{body}\n\n"
         "_🔴 Binance live · 📊 Alpaca · 🧪 Paper_"
     )
-    keyboard = kb(
+    return text, kb(
         [("📊 Statistics", "td_stats"), ("🔄 Refresh", "td_history")],
-        [("⬅️ Dashboard",  "td_home")],
+        [("⬅️ Dashboard", "td_home")],
     )
-    return text, keyboard
 
 
 # ─── SCREEN 7: Statistics ────────────────────────────────────────────────────
@@ -403,11 +424,10 @@ def screen_stats(uid):
         f"├ Win Rate:     `{wr}`\n"
         f"└ Net P&L:      `{sign}{net:.2f}`"
     )
-    keyboard = kb(
-        [("📋 Trade History", "td_history"), ("🤖 Auto Trading", "td_auto")],
-        [("⬅️ Dashboard",     "td_home")],
+    return text, kb(
+        [("📋 History", "td_history"), ("🤖 Auto Trading", "td_auto")],
+        [("⬅️ Dashboard", "td_home")],
     )
-    return text, keyboard
 
 
 # ─── SCREEN 8: Bot Settings ──────────────────────────────────────────────────
@@ -432,26 +452,54 @@ def screen_settings(uid):
         "🔗 *Exchanges*\n"
         f"├ Binance: `{conn('binance')}`\n"
         f"├ Alpaca:  `{conn('alpaca')}`\n"
-        f"├ eToro:   `{conn('etoro')}`\n"
-        f"└ Exness:  `{conn('exness')}`\n\n"
+        f"├ eToro:   `{conn('etoro')}` _(manual only — no API)_\n"
+        f"└ Exness:  `{conn('exness')}` _(needs MT5 — Phase 5)_\n\n"
         "🤖 *Crypto Trading Mode*\n"
-        f"└ `{mode_str}`\n\n"
-        "_Stocks always trade on Alpaca paper (safe)._\n"
-        "_Verify Binance before enabling Live._"
+        f"└ `{mode_str}`"
     )
-    keyboard = kb(
+    return text, kb(
         [("✅ Verify Binance", "settings_verify")],
         [(toggle, "settings_toggle_mode")],
         [("🔗 Manage APIs", "trading_menu"), ("🔔 Alerts", "settings_notif")],
         [("⬅️ Dashboard", "td_home")],
     )
-    return text, keyboard
 
 
+# ─── SCREEN 9: Trading Psychology ────────────────────────────────────────────
+def screen_psychology():
+    text = (
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 *Trading Psychology*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "*The 6 Rules of OpenAsset Bot*\n\n"
+        "1️⃣ *Risk first, returns second.*\n"
+        "   Never risk more than 1% of balance per trade.\n\n"
+        "2️⃣ *Cut losses fast.*\n"
+        f"   Stop-loss at *{STOP_LOSS_PCT}%* — no exceptions.\n"
+        "   Tiny losses compound into nothing.\n\n"
+        "3️⃣ *Let winners run.*\n"
+        f"   Take-profit at *{TAKE_PROFIT_PCT}%*. Risk/reward = 1:6.\n"
+        "   One winner pays for six losers.\n\n"
+        "4️⃣ *No revenge trading.*\n"
+        "   After a loss, pause. Use the ⏸ button.\n"
+        "   Emotional trading kills accounts.\n\n"
+        "5️⃣ *Position size = math, not feelings.*\n"
+        f"   1% risk × max ${MAX_USD_PER_TRADE} = safe sizing.\n\n"
+        "6️⃣ *Trade only what you understand.*\n"
+        "   BTC, ETH, SPY, QQQ — liquid, deep markets.\n"
+        "   No random altcoins. No memestocks.\n\n"
+        "_Discipline beats prediction. Every time._"
+    )
+    return text, kb(
+        [("🤖 Auto Trading", "td_auto"), ("✏️ Manual Trade", "td_manual")],
+        [("⬅️ Dashboard", "td_home")],
+    )
+
+
+# ─── Verify / Toggle Live Mode ───────────────────────────────────────────────
 def screen_verify(uid):
     if not has_binance(uid):
-        return ("⚠️ No Binance API key. Add via Trading Menu → Binance.",
-                kb([("⬅️ Back", "td_settings")]))
+        return ("⚠️ No Binance API key.", kb([("⬅️ Back", "td_settings")]))
     try:
         c = BinanceClient(*get_user_binance_creds(uid))
         ok, msg = c.verify_credentials()
@@ -467,19 +515,19 @@ def screen_verify(uid):
 def screen_toggle_mode(uid):
     if BINANCE_LOADED and is_live_mode(uid):
         set_live_mode(uid, False)
-        return ("🧪 *Switched to PAPER MODE*\n\nNo real orders.",
+        return ("🧪 *Switched to PAPER MODE*\n\nNo real crypto orders.",
                 kb([("⬅️ Settings", "td_settings")]))
     if not has_binance(uid):
         return ("⚠️ Connect Binance API first.",
                 kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_settings")]))
     text = (
         "⚠️ *Enable LIVE MODE?*\n\n"
-        "Crypto BUY/SELL will place *REAL orders* on Binance.\n\n"
+        "Crypto BUY/SELL will place *REAL orders*.\n\n"
         "🛡 Guards stay on:\n"
         f"├ Max ${MAX_USD_PER_TRADE}/trade\n"
+        f"├ {STOP_LOSS_PCT}% SL · {TAKE_PROFIT_PCT}% TP\n"
         "├ BTC/ETH/BNB/SOL only\n"
-        "└ No-withdraw key required\n\n"
-        "Sure?"
+        "└ No-withdraw key required\n\nSure?"
     )
     return text, kb(
         [("🔴 YES — Enable LIVE", "settings_confirm_live")],
@@ -489,26 +537,58 @@ def screen_toggle_mode(uid):
 
 def screen_confirm_live(uid):
     set_live_mode(uid, True)
-    return ("🔴 *LIVE MODE ENABLED*\n\nReal crypto orders active.\nSwitch to Paper anytime.",
+    return ("🔴 *LIVE MODE ENABLED*\n\nReal crypto orders active.",
             kb([("📊 Dashboard", "td_home"), ("⚙️ Settings", "td_settings")]))
+
+
+# ─── Pause / Resume / Stop-All ───────────────────────────────────────────────
+def screen_pause(uid, platform):
+    set_paused(uid, platform, True)
+    return (f"⏸ *{platform.title()} PAUSED*\n\n"
+            "No new orders will be placed on this platform.\n"
+            "Existing positions remain open.",
+            kb([("▶️ Resume", f"td_resume_{platform}"), ("⬅️ Auto Trading", "td_auto")]))
+
+
+def screen_resume(uid, platform):
+    set_paused(uid, platform, False)
+    return (f"▶️ *{platform.title()} RESUMED*\n\nTrading active again.",
+            kb([("⬅️ Auto Trading", "td_auto")]))
+
+
+def screen_stopall(uid):
+    set_all_paused(uid, True)
+    return ("🛑 *ALL TRADING STOPPED*\n\n"
+            "Binance + Alpaca both paused.\n"
+            "No new orders will fire.\n\n"
+            "Existing positions are untouched.\n"
+            "Resume each platform when ready.",
+            kb([("▶️ Resume Binance", "td_resume_binance"),
+                ("▶️ Resume Alpaca", "td_resume_alpaca")],
+               [("⬅️ Dashboard", "td_home")]))
 
 
 # ─── Confirm Order ───────────────────────────────────────────────────────────
 def screen_confirm(side, symbol, uid):
     cls = asset_class(symbol)
+    platform = "binance" if cls == "crypto" else "alpaca"
+
+    if is_paused(uid, platform):
+        return (f"⏸ *{platform.title()} is paused*\n\nResume it first to place orders.",
+                kb([(f"▶️ Resume {platform.title()}", f"td_resume_{platform}"),
+                    ("⬅️ Back", "td_manual")]))
+
     emoji = "🟢" if side == "buy" else "🔴"
     verb = side.upper()
-
     if cls == "crypto":
         live = BINANCE_LOADED and is_live_mode(uid) and has_binance(uid)
         badge = "🔴 *LIVE — REAL MONEY*" if live else "🧪 *PAPER*"
         venue = "Binance"
     elif cls == "stock":
-        badge = "📊 *Alpaca Paper (safe)*"
+        badge = "📊 *Alpaca*"
         venue = "Alpaca"
     else:
-        badge = "🧪 *PAPER*"
-        venue = "—"
+        badge = "🧪 *PAPER*"; venue = "—"
 
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -519,6 +599,7 @@ def screen_confirm(side, symbol, uid):
         f"Venue: `{venue}`\n"
         f"Side:  `{verb}`\n"
         f"Type:  `Market`\n\n"
+        f"🛡 Rules: SL `{STOP_LOSS_PCT}%` · TP `{TAKE_PROFIT_PCT}%`\n\n"
         "Confirm?"
     )
     return text, kb(
@@ -544,8 +625,14 @@ def _save_trade(uid, symbol, side, mode, **extra):
 
 def screen_filled(side, symbol, uid):
     cls = asset_class(symbol)
+    platform = "binance" if cls == "crypto" else "alpaca"
 
-    # ── CRYPTO via Binance ──
+    # Paused guard (defense in depth)
+    if is_paused(uid, platform):
+        return (f"⏸ *{platform.title()} is paused* — no order placed.",
+                kb([(f"▶️ Resume {platform.title()}", f"td_resume_{platform}"),
+                    ("⬅️ Back", "td_manual")]))
+
     if cls == "crypto":
         live = BINANCE_LOADED and is_live_mode(uid) and has_binance(uid)
         if live:
@@ -561,7 +648,8 @@ def screen_filled(side, symbol, uid):
                 asset = to_binance_symbol(symbol).replace("USDT", "")
                 qty = c.get_balance(asset)
                 if qty <= 0:
-                    return (f"❌ No {asset} to sell.", kb([("⬅️ Back", "td_manual")]))
+                    return (f"❌ No {asset} in your Binance Spot wallet to sell.",
+                            kb([("⬅️ Back", "td_manual")]))
                 r = c.place_market_sell(symbol, qty)
             if not r.get("success"):
                 return (f"❌ *Order Failed*\n\n`{r.get('error')}`\n\n_No funds moved._",
@@ -575,7 +663,9 @@ def screen_filled(side, symbol, uid):
                 f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
                 f"Fill: `{fmt_usd(r['fill_price'])}`\n"
                 f"Qty:  `{r['qty']:.6f}`\n"
-                f"ID:   `{r['order_id']}`\n\n_Verify on Binance._",
+                f"ID:   `{r['order_id']}`\n\n"
+                f"🛡 Watch for SL −{STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%\n"
+                "_Auto-close ships Phase 4._",
                 kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
             )
         else:
@@ -587,7 +677,6 @@ def screen_filled(side, symbol, uid):
                 kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
             )
 
-    # ── STOCK via Alpaca (paper account = safe) ──
     elif cls == "stock":
         if not has_alpaca(uid):
             return ("🔗 Connect Alpaca first.",
@@ -602,10 +691,19 @@ def screen_filled(side, symbol, uid):
         else:
             r = c.place_market_sell(symbol)
         if not r.get("success"):
-            return (f"❌ *Alpaca Order Failed*\n\n`{r.get('error')}`\n\n"
-                    "_Market may be closed — try during US hours,_\n"
-                    "_or order will queue for next open._",
-                    kb([("📋 History", "td_history"), ("⬅️ Back", "td_manual")]))
+            err = str(r.get("error", ""))
+            # Better message for "position not found"
+            if "position not found" in err.lower() or "40410000" in err:
+                msg = (f"❌ *No {symbol} position to sell.*\n\n"
+                       f"You don't currently hold any {symbol}.\n"
+                       "Buy it first, then you can sell.")
+            elif "market" in err.lower() and "closed" in err.lower():
+                msg = ("❌ *US market is closed.*\n\n"
+                       "Stocks trade 9:30am–4pm ET, Mon–Fri.\n"
+                       "Try during market hours.")
+            else:
+                msg = f"❌ *Alpaca Order Failed*\n\n`{err}`"
+            return (msg, kb([("📋 History", "td_history"), ("⬅️ Back", "td_manual")]))
         _save_trade(uid, r["symbol"], side, "ALPACA",
                     alpaca_order_id=r.get("order_id"),
                     entry_price=r.get("fill_price", 0), qty=r.get("qty", 0),
@@ -614,7 +712,8 @@ def screen_filled(side, symbol, uid):
             f"✅ *Alpaca Order Placed* {'(paper)' if paper else '(live)'}\n\n"
             f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
             f"Order ID: `{r.get('order_id','—')}`\n"
-            f"Time: `{ts_now()}`\n\n_Real Alpaca order flow, fake money._",
+            f"Time: `{ts_now()}`\n\n"
+            f"🛡 Watch for SL −{STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%",
             kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
         )
     else:
@@ -636,19 +735,33 @@ async def handle_trading_callbacks(update, ctx):
     uid = str(query.from_user.id)
     text, keyboard = None, None
 
-    if   data == "td_home":     text, keyboard = screen_trading_home(uid)
-    elif data == "td_auto":     text, keyboard = screen_auto(uid)
-    elif data == "td_manual":   text, keyboard = screen_manual()
-    elif data == "td_market":   text, keyboard = screen_market(uid)
-    elif data == "td_history":  text, keyboard = screen_history(uid)
-    elif data == "td_stats":    text, keyboard = screen_stats(uid)
-    elif data == "td_settings": text, keyboard = screen_settings(uid)
+    # Screens
+    if   data == "td_home":       text, keyboard = screen_trading_home(uid)
+    elif data == "td_mainmenu":   text, keyboard = screen_mainmenu(uid)
+    elif data == "td_auto":       text, keyboard = screen_auto(uid)
+    elif data == "td_manual":     text, keyboard = screen_manual()
+    elif data == "td_market":     text, keyboard = screen_market(uid)
+    elif data == "td_history":    text, keyboard = screen_history(uid)
+    elif data == "td_stats":      text, keyboard = screen_stats(uid)
+    elif data == "td_settings":   text, keyboard = screen_settings(uid)
+    elif data == "td_psychology": text, keyboard = screen_psychology()
+
+    # Pause / resume / stop-all
+    elif data == "td_pause_binance":  text, keyboard = screen_pause(uid, "binance")
+    elif data == "td_pause_alpaca":   text, keyboard = screen_pause(uid, "alpaca")
+    elif data == "td_resume_binance": text, keyboard = screen_resume(uid, "binance")
+    elif data == "td_resume_alpaca":  text, keyboard = screen_resume(uid, "alpaca")
+    elif data == "td_stopall":        text, keyboard = screen_stopall(uid)
+
+    # Settings actions
     elif data == "settings_verify":       text, keyboard = screen_verify(uid)
     elif data == "settings_toggle_mode":  text, keyboard = screen_toggle_mode(uid)
     elif data == "settings_confirm_live": text, keyboard = screen_confirm_live(uid)
     elif data == "settings_notif":
         text = "🔔 *Notifications*\n\n✅ All alerts active."
         keyboard = kb([("⬅️ Settings", "td_settings")])
+
+    # Pair / order flow
     elif data.startswith("mt_"):
         text, keyboard = screen_trade_detail(data[3:], uid)
     elif data.startswith("exec_buy_"):
@@ -659,16 +772,19 @@ async def handle_trading_callbacks(update, ctx):
         text, keyboard = screen_filled("buy", data[12:], uid)
     elif data.startswith("confirm_sell_"):
         text, keyboard = screen_filled("sell", data[13:], uid)
+
     elif data == "bot_start":
-        text = "🤖 *Auto engine ships Phase 4.*\nUse Manual Trade."
+        text = "🤖 *Auto engine ships Phase 4.*\nUse Manual Trade for now."
         keyboard = kb([("⬅️ Back", "td_auto")])
     elif data == "bot_config":
-        text = (f"🔧 *Config*\n├ Risk 1%\n├ Max ${MAX_USD_PER_TRADE}\n"
-                "├ SL 2% · TP 3%\n└ BTC/ETH/BNB/SOL + stocks")
+        text = (f"🔧 *Config*\n"
+                f"├ Risk {RISK_PCT}% · Max ${MAX_USD_PER_TRADE}\n"
+                f"├ SL {STOP_LOSS_PCT}% · TP {TAKE_PROFIT_PCT}%\n"
+                "└ BTC/ETH/BNB/SOL + stocks")
         keyboard = kb([("⬅️ Back", "td_auto")])
 
     if text is None:
-        return  # not ours — let host bot handle (back_home, trading_menu, etc.)
+        return  # not ours — host bot handles
 
     try:
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
