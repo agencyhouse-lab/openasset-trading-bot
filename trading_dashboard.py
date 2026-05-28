@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """
-OpenAsset Trading Dashboard — Live Binance Integration
-======================================================
+OpenAsset Trading Dashboard — Binance (crypto) + Alpaca (stocks)
+================================================================
 
-When the user has Binance API connected:
-  * Home screen shows REAL USDT balance
-  * Market Data shows LIVE prices for BTC/ETH/BNB/SOL
-  * Trade Detail shows LIVE price for the selected symbol
-  * Manual BUY/SELL in Live Mode places REAL orders (with hard caps)
+Routing by asset class:
+  * Crypto  (BTC/ETH/BNB/SOL)  → Binance  — real orders in Live Mode
+  * Stocks  (SPY/QQQ/GLD/USO/IWM/DIA) → Alpaca — paper account (safe)
+  * Unknown → demo stub
 
-When the user has NOT connected Binance:
-  * Falls back to demo prices
-  * Dashboard still works, no crashes
-
-Live Mode is OFF by default. User must explicitly toggle in Settings.
-Stocks/ETFs/Commodities stay in demo mode until Alpaca integration.
+Home/menu buttons use the host bot's real callbacks:
+  * back_home     (host bot main menu)
+  * trading_menu  (host bot platform selection)
 """
 
 import os
@@ -25,20 +21,28 @@ from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
+# ── Binance ──
 try:
     from binance_client import (
-        BinanceClient,
-        get_client_for_user,
-        get_user_binance_creds,
-        is_live_mode,
-        set_live_mode,
-        calc_trade_size_usd,
-        to_binance_symbol,
-        MAX_USD_PER_TRADE,
+        BinanceClient, get_client_for_user as get_binance_client,
+        get_user_binance_creds, is_live_mode, set_live_mode,
+        calc_trade_size_usd, to_binance_symbol, MAX_USD_PER_TRADE,
     )
     BINANCE_LOADED = True
 except ImportError:
     BINANCE_LOADED = False
+    MAX_USD_PER_TRADE = 50.0
+
+# ── Alpaca ──
+try:
+    from alpaca_client import (
+        get_client_for_user as get_alpaca_client,
+        get_user_alpaca_creds,
+        calc_trade_size_usd as alpaca_trade_size,
+    )
+    ALPACA_LOADED = True
+except ImportError:
+    ALPACA_LOADED = False
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +57,13 @@ TRADING_CALLBACK_PATTERN = (
     r"settings_confirm_live)"
 )
 
-LIVE_SYMBOLS = {"BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD",
-                "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"}
+CRYPTO_SYMBOLS = {"BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD"}
+STOCK_SYMBOLS = {"SPY", "QQQ", "GLD", "USO", "IWM", "DIA"}
 
-DEMO_PRICES = {
-    "SPY": ("$521.44", "$523.10", "$519.80", "+0.31%", True),
-    "QQQ": ("$442.10", "$445.00", "$440.20", "+0.52%", True),
-    "GLD": ("$231.75", "$232.50", "$230.80", "+0.18%", True),
-    "USO": ("$74.20",  "$75.10",  "$73.80",  "+0.54%", True),
+# Fallback demo prices for stocks if Alpaca data unavailable
+DEMO_STOCKS = {
+    "SPY": "521.44", "QQQ": "442.10", "GLD": "231.75",
+    "USO": "74.20",  "IWM": "201.30", "DIA": "389.20",
 }
 
 
@@ -94,19 +97,39 @@ def get_user_trades(uid):
 
 def kb(*rows):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(text, callback_data=data) for text, data in row]
+        [InlineKeyboardButton(t, callback_data=d) for t, d in row]
         for row in rows
     ])
 
 
+def asset_class(symbol):
+    s = symbol.upper()
+    if s in CRYPTO_SYMBOLS or s.endswith("USDT"):
+        return "crypto"
+    if s in STOCK_SYMBOLS:
+        return "stock"
+    return None
+
+
+def has_binance(uid):
+    return BINANCE_LOADED and get_user_binance_creds(uid) is not None
+
+
+def has_alpaca(uid):
+    return ALPACA_LOADED and get_user_alpaca_creds(uid) is not None
+
+
 def mode_badge(uid):
     if BINANCE_LOADED and is_live_mode(uid):
-        return "🔴 *LIVE MODE*"
+        return "🔴 *LIVE MODE* (crypto)"
     return "🧪 *PAPER MODE*"
 
 
 def fmt_usd(n):
-    return f"${n:,.2f}" if abs(n) >= 1 else f"${n:.4f}"
+    try:
+        return f"${n:,.2f}" if abs(n) >= 1 else f"${n:.4f}"
+    except Exception:
+        return "$—"
 
 
 def fmt_pct(n):
@@ -117,14 +140,19 @@ def fmt_pct(n):
 # ─── SCREEN 1: Trading Home ──────────────────────────────────────────────────
 def screen_trading_home(uid):
     badge = mode_badge(uid)
-    has_creds = BINANCE_LOADED and get_user_binance_creds(uid) is not None
 
-    bal_line = "🔗 Connect Binance to see balance"
-    if has_creds:
-        client = get_client_for_user(uid)
-        if client:
-            usdt = client.get_balance("USDT")
-            bal_line = f"💰 USDT Balance: `{fmt_usd(usdt)}`"
+    bn_line = "├ Binance: 🔗 not connected"
+    if has_binance(uid):
+        c = get_binance_client(uid)
+        if c:
+            bn_line = f"├ Binance: 💰 {fmt_usd(c.get_balance('USDT'))} USDT"
+
+    al_line = "└ Alpaca:  🔗 not connected"
+    if has_alpaca(uid):
+        c, paper = get_alpaca_client(uid)
+        if c:
+            tag = "paper" if paper else "live"
+            al_line = f"└ Alpaca:  💵 {fmt_usd(c.get_cash())} ({tag})"
 
     trades = get_user_trades(uid)
     open_t = [t for t in trades if t.get("status") == "OPEN"]
@@ -134,7 +162,9 @@ def screen_trading_home(uid):
         "📊 *Trading Dashboard*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{badge}\n\n"
-        f"{bal_line}\n"
+        "💼 *Accounts*\n"
+        f"{bn_line}\n"
+        f"{al_line}\n\n"
         f"📈 Open trades: `{len(open_t)}`\n"
         f"📋 Total:       `{len(trades)} trades`\n\n"
         f"🕐 `{ts_now()}` · `{date_now()}`"
@@ -143,31 +173,28 @@ def screen_trading_home(uid):
         [("🤖 Auto Trading", "td_auto"),    ("✏️ Manual Trade", "td_manual")],
         [("📈 Market Data",  "td_market"),  ("📋 Trade History","td_history")],
         [("📊 Statistics",   "td_stats"),   ("⚙️ Bot Settings", "td_settings")],
-        [("🏠 Main Menu",    "main_menu")],
+        [("🏠 Main Menu",    "back_home")],
     )
     return text, keyboard
 
 
 # ─── SCREEN 2: Auto Trading ──────────────────────────────────────────────────
 def screen_auto(uid):
-    binance_ok = BINANCE_LOADED and get_user_binance_creds(uid) is not None
     open_t = [t for t in get_user_trades(uid) if t.get("status") == "OPEN"]
-    badge = mode_badge(uid)
-
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "🤖 *Auto Trading Bot*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{badge}\n\n"
-        f"Exchange: `{'Binance ✅' if binance_ok else '⚠️ Connect first'}`\n"
-        f"Status:   `⬜ Standby`\n"
-        f"Open:     `{len(open_t)} positions`\n\n"
+        f"{mode_badge(uid)}\n\n"
+        f"Binance: `{'✅' if has_binance(uid) else '⚠️ connect'}`\n"
+        f"Alpaca:  `{'✅' if has_alpaca(uid) else '⚠️ connect'}`\n"
+        f"Status:  `⬜ Standby`\n"
+        f"Open:    `{len(open_t)} positions`\n\n"
         "⚙️ *Default Settings*\n"
         "├ Risk/Trade: `1% of balance`\n"
         f"├ Max/Trade:  `${MAX_USD_PER_TRADE} cap`\n"
         "├ Stop Loss:  `2%`\n"
-        "├ Take Profit:`3%`\n"
-        "└ Strategy:   `Trend following`\n\n"
+        "└ Take Profit:`3%`\n\n"
         "_Auto engine ships in Phase 4._\n"
         "_For now use Manual Trade._"
     )
@@ -184,17 +211,15 @@ def screen_manual():
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "✏️ *Manual Trading*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "*Live (Binance):*\n"
-        "_Real-time prices, real orders in Live Mode._\n\n"
-        "*Demo (Stocks/ETFs):*\n"
-        "_Paper trading only._\n\n"
+        "🔶 *Crypto* — Binance (live in Live Mode)\n"
+        "📊 *Stocks* — Alpaca (paper, safe)\n\n"
         "Choose an asset:"
     )
     keyboard = kb(
-        [("₿ BTC/USD",   "mt_BTCUSD"),  ("Ξ ETH/USD",  "mt_ETHUSD")],
-        [("🟡 BNB/USD",  "mt_BNBUSD"),  ("◎ SOL/USD",  "mt_SOLUSD")],
-        [("📈 SPY",      "mt_SPY"),     ("📈 QQQ",     "mt_QQQ")],
-        [("🥇 GLD",      "mt_GLD"),     ("⚫ USO",     "mt_USO")],
+        [("₿ BTC/USD",  "mt_BTCUSD"), ("Ξ ETH/USD", "mt_ETHUSD")],
+        [("🟡 BNB/USD", "mt_BNBUSD"), ("◎ SOL/USD", "mt_SOLUSD")],
+        [("📈 SPY",     "mt_SPY"),    ("📈 QQQ",    "mt_QQQ")],
+        [("🥇 GLD",     "mt_GLD"),    ("⚫ USO",    "mt_USO")],
         [("⬅️ Dashboard","td_home")],
     )
     return text, keyboard
@@ -202,39 +227,60 @@ def screen_manual():
 
 # ─── SCREEN 4: Trade Detail ──────────────────────────────────────────────────
 def screen_trade_detail(symbol, uid):
+    cls = asset_class(symbol)
     badge = mode_badge(uid)
-    is_crypto = symbol.upper() in LIVE_SYMBOLS
-    has_creds = BINANCE_LOADED and get_user_binance_creds(uid) is not None
 
-    if is_crypto and has_creds:
-        client = get_client_for_user(uid)
-        if client:
-            s = client.get_24h_stats(symbol)
-            p, hi, lo = fmt_usd(s["price"]), fmt_usd(s["high"]), fmt_usd(s["low"])
-            chg = fmt_pct(s["change_pct"])
-            arrow = "✅" if s["change_pct"] >= 0 else "❌"
-            data_tag = "🟢 LIVE"
+    # CRYPTO (Binance)
+    if cls == "crypto":
+        if has_binance(uid):
+            c = get_binance_client(uid)
+            if c:
+                s = c.get_24h_stats(symbol)
+                p, hi, lo = fmt_usd(s["price"]), fmt_usd(s["high"]), fmt_usd(s["low"])
+                chg = fmt_pct(s["change_pct"])
+                arrow = "✅" if s["change_pct"] >= 0 else "❌"
+                tag = "🟢 LIVE · Binance"
+                usdt = c.get_balance("USDT")
+                size = calc_trade_size_usd(usdt)
+                size_line = f"\n💵 Trade size: `{fmt_usd(size)}` _(1%, capped)_"
+                buttons = kb(
+                    [("🟢 BUY", f"exec_buy_{symbol}"), ("🔴 SELL", f"exec_sell_{symbol}")],
+                    [("⬅️ Back", "td_manual")],
+                )
+            else:
+                return ("⚠️ Binance client error.", kb([("⬅️ Back", "td_manual")]))
         else:
-            p, hi, lo, chg, arrow, data_tag = "—", "—", "—", "—", "⚠️", "ERROR"
-    elif is_crypto and not has_creds:
-        p, hi, lo, chg, arrow, data_tag = "—", "—", "—", "—", "⚠️", "Connect API"
-    else:
-        d = DEMO_PRICES.get(symbol, ("—", "—", "—", "—", True))
-        p, hi, lo, chg = d[0], d[1], d[2], d[3]
-        arrow = "✅" if d[4] else "❌"
-        data_tag = "📋 DEMO"
+            return ("🔗 Connect Binance first (Trading Menu → Binance).",
+                    kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_manual")]))
 
-    size_line = ""
-    if is_crypto and has_creds:
-        client = get_client_for_user(uid)
-        if client:
-            usdt = client.get_balance("USDT")
-            size = calc_trade_size_usd(usdt)
-            size_line = f"\n💵 Trade size: `{fmt_usd(size)}` _(1%, capped)_"
+    # STOCK (Alpaca)
+    elif cls == "stock":
+        if has_alpaca(uid):
+            c, paper = get_alpaca_client(uid)
+            if c:
+                price = c.get_price(symbol)
+                p = fmt_usd(price) if price else f"${DEMO_STOCKS.get(symbol,'—')}"
+                hi = lo = "—"
+                chg, arrow = "—", "📊"
+                tag = f"🟢 LIVE · Alpaca {'(paper)' if paper else '(live)'}"
+                cash = c.get_cash()
+                size = alpaca_trade_size(cash)
+                size_line = f"\n💵 Trade size: `{fmt_usd(size)}` _(1%, capped)_"
+                buttons = kb(
+                    [("🟢 BUY", f"exec_buy_{symbol}"), ("🔴 SELL", f"exec_sell_{symbol}")],
+                    [("⬅️ Back", "td_manual")],
+                )
+            else:
+                return ("⚠️ Alpaca client error.", kb([("⬅️ Back", "td_manual")]))
+        else:
+            return ("🔗 Connect Alpaca first (Trading Menu → Alpaca).",
+                    kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_manual")]))
+    else:
+        return ("⚠️ Unknown symbol.", kb([("⬅️ Back", "td_manual")]))
 
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 *{symbol}*  ·  `{data_tag}`\n"
+        f"📊 *{symbol}*  ·  `{tag}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{badge}\n\n"
         f"💲 Price:     `{p}`\n"
@@ -248,73 +294,54 @@ def screen_trade_detail(symbol, uid):
         "├ Stop Loss:   `−2%`\n"
         "└ Take Profit: `+3%`"
     )
-
-    if is_crypto and has_creds:
-        keyboard = kb(
-            [("🟢 BUY",  f"exec_buy_{symbol}"), ("🔴 SELL", f"exec_sell_{symbol}")],
-            [("⬅️ Back", "td_manual")],
-        )
-    elif is_crypto and not has_creds:
-        keyboard = kb(
-            [("🔗 Connect Binance first", "main_trading_menu")],
-            [("⬅️ Back", "td_manual")],
-        )
-    else:
-        keyboard = kb(
-            [("📋 Paper BUY",  f"exec_buy_{symbol}"),
-             ("📋 Paper SELL", f"exec_sell_{symbol}")],
-            [("⬅️ Back", "td_manual")],
-        )
-    return text, keyboard
+    return text, buttons
 
 
 # ─── SCREEN 5: Market Data ───────────────────────────────────────────────────
 def screen_market(uid):
-    has_creds = BINANCE_LOADED and get_user_binance_creds(uid) is not None
-
-    if has_creds:
-        client = get_client_for_user(uid)
-        if client:
-            try:
-                btc = client.get_24h_stats("BTCUSDT")
-                eth = client.get_24h_stats("ETHUSDT")
-                bnb = client.get_24h_stats("BNBUSDT")
-                sol = client.get_24h_stats("SOLUSDT")
-                crypto_block = (
-                    "🔶 *Crypto* `🟢 LIVE`\n"
-                    f"├ ₿  BTC `{fmt_usd(btc['price'])}` `{fmt_pct(btc['change_pct'])}` "
-                    f"{'✅' if btc['change_pct']>=0 else '❌'}\n"
-                    f"├ Ξ  ETH `{fmt_usd(eth['price'])}` `{fmt_pct(eth['change_pct'])}` "
-                    f"{'✅' if eth['change_pct']>=0 else '❌'}\n"
-                    f"├ BNB    `{fmt_usd(bnb['price'])}` `{fmt_pct(bnb['change_pct'])}` "
-                    f"{'✅' if bnb['change_pct']>=0 else '❌'}\n"
-                    f"└ SOL    `{fmt_usd(sol['price'])}` `{fmt_pct(sol['change_pct'])}` "
-                    f"{'✅' if sol['change_pct']>=0 else '❌'}\n\n"
-                )
-            except Exception as e:
-                logger.warning(f"Market live fetch failed: {e}")
-                crypto_block = "🔶 *Crypto* `⚠️ API ERROR`\n_Check API key._\n\n"
-        else:
-            crypto_block = "🔶 *Crypto* `⚠️ Init failed`\n\n"
+    # Crypto block
+    if has_binance(uid):
+        c = get_binance_client(uid)
+        try:
+            btc = c.get_24h_stats("BTCUSDT"); eth = c.get_24h_stats("ETHUSDT")
+            bnb = c.get_24h_stats("BNBUSDT"); sol = c.get_24h_stats("SOLUSDT")
+            crypto = (
+                "🔶 *Crypto* `🟢 LIVE`\n"
+                f"├ BTC `{fmt_usd(btc['price'])}` `{fmt_pct(btc['change_pct'])}`\n"
+                f"├ ETH `{fmt_usd(eth['price'])}` `{fmt_pct(eth['change_pct'])}`\n"
+                f"├ BNB `{fmt_usd(bnb['price'])}` `{fmt_pct(bnb['change_pct'])}`\n"
+                f"└ SOL `{fmt_usd(sol['price'])}` `{fmt_pct(sol['change_pct'])}`\n\n"
+            )
+        except Exception as e:
+            logger.warning(f"crypto market: {e}")
+            crypto = "🔶 *Crypto* `⚠️ API error`\n\n"
     else:
-        crypto_block = (
-            "🔶 *Crypto* `🔗 Connect Binance`\n"
-            "_Add API key for live data._\n\n"
-        )
+        crypto = "🔶 *Crypto* `🔗 Connect Binance`\n\n"
+
+    # Stock block (Alpaca)
+    if has_alpaca(uid):
+        c, paper = get_alpaca_client(uid)
+        try:
+            spy = c.get_price("SPY"); qqq = c.get_price("QQQ")
+            gld = c.get_price("GLD"); uso = c.get_price("USO")
+            stocks = (
+                f"📊 *Stocks* `🟢 LIVE · Alpaca`\n"
+                f"├ SPY `{fmt_usd(spy)}`\n"
+                f"├ QQQ `{fmt_usd(qqq)}`\n"
+                f"├ GLD `{fmt_usd(gld)}`\n"
+                f"└ USO `{fmt_usd(uso)}`\n\n"
+            )
+        except Exception as e:
+            logger.warning(f"stock market: {e}")
+            stocks = "📊 *Stocks* `⚠️ market closed / API`\n\n"
+    else:
+        stocks = "📊 *Stocks* `🔗 Connect Alpaca`\n\n"
 
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📈 *Market Data*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{crypto_block}"
-        "📊 *Stocks / ETFs* `📋 DEMO`\n"
-        "├ SPY `$521.44` `+0.31%` ✅\n"
-        "├ QQQ `$442.10` `+0.52%` ✅\n"
-        "├ IWM `$201.30` `−0.12%` ❌\n"
-        "└ DIA `$389.20` `+0.08%` ✅\n\n"
-        "🏅 *Commodities* `📋 DEMO`\n"
-        "├ GLD `$231.75` `+0.18%` ✅\n"
-        "└ USO `$74.20`  `+0.54%` ✅\n\n"
+        f"{crypto}{stocks}"
         f"🕐 `{ts_now()}`"
     )
     keyboard = kb(
@@ -326,33 +353,26 @@ def screen_market(uid):
 
 # ─── SCREEN 6: Trade History ─────────────────────────────────────────────────
 def screen_history(uid):
-    trades = sorted(
-        get_user_trades(uid),
-        key=lambda x: x.get("created_at", ""),
-        reverse=True,
-    )[:5]
-
+    trades = sorted(get_user_trades(uid),
+                    key=lambda x: x.get("created_at", ""), reverse=True)[:6]
     if not trades:
         body = "_No trades yet._\n\nStart with Manual Trade."
     else:
         rows = []
         for i, t in enumerate(trades, 1):
-            side = t.get("side", "?")
-            sym = t.get("symbol", "?")
-            pnl = t.get("pnl", 0)
-            mode = t.get("mode", "PAPER")
+            side, sym = t.get("side", "?"), t.get("symbol", "?")
+            pnl, mode = t.get("pnl", 0), t.get("mode", "PAPER")
             icon = "✅" if pnl >= 0 else "❌"
             sign = "+" if pnl >= 0 else ""
-            tag = "🔴" if mode == "LIVE" else "🧪"
+            tag = {"LIVE": "🔴", "ALPACA": "📊", "PAPER": "🧪"}.get(mode, "🧪")
             rows.append(f"{i}️⃣  {tag} {sym} · {side} {icon}  `{sign}{pnl:.2f}`")
         body = "\n\n".join(rows)
-
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📋 *Trade History*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{body}\n\n"
-        "_🔴 Live · 🧪 Paper_"
+        "_🔴 Binance live · 📊 Alpaca · 🧪 Paper_"
     )
     keyboard = kb(
         [("📊 Statistics", "td_stats"), ("🔄 Refresh", "td_history")],
@@ -366,25 +386,22 @@ def screen_stats(uid):
     trades = get_user_trades(uid)
     total = len(trades)
     wins = sum(1 for t in trades if t.get("pnl", 0) >= 0)
-    losses = total - wins
-    net_pnl = sum(t.get("pnl", 0) for t in trades)
-    wr = f"{wins / total * 100:.1f}%" if total else "—"
-    sign = "+" if net_pnl >= 0 else ""
-    live_count = sum(1 for t in trades if t.get("mode") == "LIVE")
-    paper_count = total - live_count
-
+    net = sum(t.get("pnl", 0) for t in trades)
+    wr = f"{wins/total*100:.1f}%" if total else "—"
+    sign = "+" if net >= 0 else ""
+    live = sum(1 for t in trades if t.get("mode") == "LIVE")
+    alp = sum(1 for t in trades if t.get("mode") == "ALPACA")
+    paper = total - live - alp
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "📊 *Performance Stats*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🏆 *All Time*\n"
         f"├ Total Trades: `{total}`\n"
-        f"├ Live trades:  `{live_count}`\n"
-        f"├ Paper trades: `{paper_count}`\n"
+        f"├ Binance live: `{live}`\n"
+        f"├ Alpaca:       `{alp}`\n"
+        f"├ Paper:        `{paper}`\n"
         f"├ Win Rate:     `{wr}`\n"
-        f"├ Winners:      `{wins}`\n"
-        f"├ Losers:       `{losses}`\n"
-        f"└ Net P&L:      `{sign}{net_pnl:.2f}`"
+        f"└ Net P&L:      `{sign}{net:.2f}`"
     )
     keyboard = kb(
         [("📋 Trade History", "td_history"), ("🤖 Auto Trading", "td_auto")],
@@ -399,15 +416,14 @@ def screen_settings(uid):
 
     def conn(name):
         a = accts.get(name, {})
-        s = a.get("status", "not_set")
-        if s == "connected": return "🟢 Connected"
-        if s == "error":     return "🔴 Error"
-        if a.get("api_key"): return "🟡 Unverified"
+        if a.get("status") == "connected": return "🟢 Connected"
+        if a.get("status") == "error":     return "🔴 Error"
+        if a.get("api_key"):                return "🟡 Unverified"
         return "⬜ Not set"
 
     live = BINANCE_LOADED and is_live_mode(uid)
-    mode_str = "🔴 LIVE (real orders)" if live else "🧪 PAPER (safe)"
-    toggle_label = "🧪 Switch to PAPER" if live else "🔴 Enable LIVE MODE"
+    mode_str = "🔴 LIVE (real crypto orders)" if live else "🧪 PAPER (safe)"
+    toggle = "🧪 Switch to PAPER" if live else "🔴 Enable LIVE MODE"
 
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -418,240 +434,198 @@ def screen_settings(uid):
         f"├ Alpaca:  `{conn('alpaca')}`\n"
         f"├ eToro:   `{conn('etoro')}`\n"
         f"└ Exness:  `{conn('exness')}`\n\n"
-        "🤖 *Trading Mode*\n"
+        "🤖 *Crypto Trading Mode*\n"
         f"└ `{mode_str}`\n\n"
-        "_Verify your Binance key before_\n"
-        "_enabling Live Mode._"
+        "_Stocks always trade on Alpaca paper (safe)._\n"
+        "_Verify Binance before enabling Live._"
     )
     keyboard = kb(
         [("✅ Verify Binance", "settings_verify")],
-        [(toggle_label, "settings_toggle_mode")],
-        [("🔗 Manage APIs", "main_trading_menu"), ("🔔 Alerts", "settings_notif")],
+        [(toggle, "settings_toggle_mode")],
+        [("🔗 Manage APIs", "trading_menu"), ("🔔 Alerts", "settings_notif")],
         [("⬅️ Dashboard", "td_home")],
     )
     return text, keyboard
 
 
 def screen_verify(uid):
-    if not BINANCE_LOADED:
-        return ("❌ python-binance not loaded.",
-                kb([("⬅️ Back", "td_settings")]))
-    creds = get_user_binance_creds(uid)
-    if not creds:
-        return ("⚠️ No Binance API key found.\n\n"
-                "Add via *Trading Menu → Binance*.",
+    if not has_binance(uid):
+        return ("⚠️ No Binance API key. Add via Trading Menu → Binance.",
                 kb([("⬅️ Back", "td_settings")]))
     try:
-        client = BinanceClient(*creds)
-        ok, msg = client.verify_credentials()
+        c = BinanceClient(*get_user_binance_creds(uid))
+        ok, msg = c.verify_credentials()
     except Exception as e:
-        ok, msg = False, f"❌ Error: {e}"
-
+        ok, msg = False, f"❌ {e}"
     if ok:
-        bal = client.get_balance("USDT")
-        text = (
-            "✅ *Binance Connection Verified*\n\n"
-            f"{msg}\n\n"
-            f"💰 USDT Balance: `{fmt_usd(bal)}`\n\n"
-            "Safe to enable Live Mode."
-        )
+        text = f"✅ *Binance Verified*\n\n{msg}\n\n💰 USDT: `{fmt_usd(c.get_balance('USDT'))}`"
     else:
         text = "❌ *Verification Failed*\n\n" + msg
     return text, kb([("⬅️ Back", "td_settings")])
 
 
 def screen_toggle_mode(uid):
-    currently_live = BINANCE_LOADED and is_live_mode(uid)
-    if currently_live:
+    if BINANCE_LOADED and is_live_mode(uid):
         set_live_mode(uid, False)
-        text = (
-            "🧪 *Switched to PAPER MODE*\n\n"
-            "No real orders will be placed."
-        )
-        return text, kb([("⬅️ Settings", "td_settings")])
-
-    if not BINANCE_LOADED:
-        return "❌ Binance module not loaded.", kb([("⬅️ Back", "td_settings")])
-    if not get_user_binance_creds(uid):
+        return ("🧪 *Switched to PAPER MODE*\n\nNo real orders.",
+                kb([("⬅️ Settings", "td_settings")]))
+    if not has_binance(uid):
         return ("⚠️ Connect Binance API first.",
-                kb([("🔗 Connect Binance", "main_trading_menu"),
-                    ("⬅️ Back", "td_settings")]))
-
+                kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_settings")]))
     text = (
         "⚠️ *Enable LIVE MODE?*\n\n"
-        "Every BUY/SELL will place a\n"
-        "*REAL ORDER* on Binance.\n\n"
-        "🛡 Safety guards stay active:\n"
-        f"├ Max per trade: `${MAX_USD_PER_TRADE}`\n"
-        "├ Whitelist: `BTC, ETH, BNB, SOL`\n"
-        "└ Withdraw key permission: OFF\n\n"
-        "Are you sure?"
+        "Crypto BUY/SELL will place *REAL orders* on Binance.\n\n"
+        "🛡 Guards stay on:\n"
+        f"├ Max ${MAX_USD_PER_TRADE}/trade\n"
+        "├ BTC/ETH/BNB/SOL only\n"
+        "└ No-withdraw key required\n\n"
+        "Sure?"
     )
-    keyboard = kb(
+    return text, kb(
         [("🔴 YES — Enable LIVE", "settings_confirm_live")],
         [("❌ Cancel", "td_settings")],
     )
-    return text, keyboard
 
 
 def screen_confirm_live(uid):
     set_live_mode(uid, True)
-    text = (
-        "🔴 *LIVE MODE ENABLED*\n\n"
-        "Real orders are now active.\n"
-        "Trade carefully.\n\n"
-        "Switch back to Paper anytime."
-    )
-    return text, kb([("📊 Dashboard", "td_home"), ("⚙️ Settings", "td_settings")])
+    return ("🔴 *LIVE MODE ENABLED*\n\nReal crypto orders active.\nSwitch to Paper anytime.",
+            kb([("📊 Dashboard", "td_home"), ("⚙️ Settings", "td_settings")]))
 
 
 # ─── Confirm Order ───────────────────────────────────────────────────────────
 def screen_confirm(side, symbol, uid):
-    is_crypto = symbol.upper() in LIVE_SYMBOLS
-    has_creds = BINANCE_LOADED and get_user_binance_creds(uid) is not None
-    will_be_live = is_crypto and has_creds and is_live_mode(uid)
-
-    badge = "🔴 *LIVE — REAL MONEY*" if will_be_live else "🧪 *PAPER — no real funds*"
+    cls = asset_class(symbol)
     emoji = "🟢" if side == "buy" else "🔴"
     verb = side.upper()
 
-    size_line = ""
-    if will_be_live and side == "buy":
-        client = get_client_for_user(uid)
-        if client:
-            usdt = client.get_balance("USDT")
-            size = calc_trade_size_usd(usdt)
-            size_line = f"Amount: `{fmt_usd(size)}` _(1% of {fmt_usd(usdt)})_\n"
+    if cls == "crypto":
+        live = BINANCE_LOADED and is_live_mode(uid) and has_binance(uid)
+        badge = "🔴 *LIVE — REAL MONEY*" if live else "🧪 *PAPER*"
+        venue = "Binance"
+    elif cls == "stock":
+        badge = "📊 *Alpaca Paper (safe)*"
+        venue = "Alpaca"
+    else:
+        badge = "🧪 *PAPER*"
+        venue = "—"
 
     text = (
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"{emoji} *Confirm {verb}*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{badge}\n\n"
-        f"Asset:  `{symbol}`\n"
-        f"Side:   `{verb}`\n"
-        f"Type:   `Market`\n"
-        f"{size_line}"
-        "\nConfirm?"
+        f"Asset: `{symbol}`\n"
+        f"Venue: `{venue}`\n"
+        f"Side:  `{verb}`\n"
+        f"Type:  `Market`\n\n"
+        "Confirm?"
     )
-    keyboard = kb(
-        [(f"✅ Confirm {verb}", f"confirm_{side}_{symbol}"),
-         ("❌ Cancel", "td_manual")],
+    return text, kb(
+        [(f"✅ Confirm {verb}", f"confirm_{side}_{symbol}"), ("❌ Cancel", "td_manual")],
     )
-    return text, keyboard
 
 
 # ─── Order Placed ────────────────────────────────────────────────────────────
-def screen_filled(side, symbol, uid):
-    is_crypto = symbol.upper() in LIVE_SYMBOLS
-    has_creds = BINANCE_LOADED and get_user_binance_creds(uid) is not None
-    go_live = is_crypto and has_creds and is_live_mode(uid)
-
-    if go_live:
-        client = get_client_for_user(uid)
-        if not client:
-            return ("❌ Binance client init failed.",
-                    kb([("⬅️ Back", "td_manual")]))
-
-        if side == "buy":
-            usdt = client.get_balance("USDT")
-            size = calc_trade_size_usd(usdt)
-            if usdt < size:
-                return (f"❌ Need `{fmt_usd(size)}` USDT, have `{fmt_usd(usdt)}`.",
-                        kb([("⬅️ Back", "td_manual")]))
-            result = client.place_market_buy(symbol, size)
-        else:
-            asset = to_binance_symbol(symbol).replace("USDT", "")
-            qty = client.get_balance(asset)
-            if qty <= 0:
-                return (f"❌ No {asset} balance to sell.",
-                        kb([("⬅️ Back", "td_manual")]))
-            result = client.place_market_sell(symbol, qty)
-
-        if not result.get("success"):
-            text = (
-                "❌ *Order Failed*\n\n"
-                f"Symbol: `{symbol}`\n"
-                f"Side:   `{side.upper()}`\n"
-                f"Error:  `{result.get('error')}`\n\n"
-                "_No funds moved._"
-            )
-            return text, kb(
-                [("📋 History", "td_history"), ("⬅️ Back", "td_manual")],
-            )
-
-        trades = _load("trades")
-        tid = f"TRADE_{uid}_{int(datetime.now(timezone.utc).timestamp())}"
-        trades[tid] = {
-            "trade_id":    tid,
-            "user_id":     int(uid),
-            "symbol":      result["symbol"],
-            "side":        side.upper(),
-            "type":        "MANUAL",
-            "mode":        "LIVE",
-            "order_type":  "MARKET",
-            "status":      "OPEN" if side == "buy" else "CLOSED",
-            "binance_order_id": result["order_id"],
-            "entry_price": result["fill_price"],
-            "qty":         result["qty"],
-            "pnl":         0,
-            "created_at":  datetime.now(timezone.utc).isoformat(),
-        }
-        _save("trades", trades)
-
-        emoji = "🟢" if side == "buy" else "🔴"
-        text = (
-            "✅ *LIVE Order Filled!*\n\n"
-            f"{emoji} {side.upper()} `{result['symbol']}`\n"
-            f"Fill price: `{fmt_usd(result['fill_price'])}`\n"
-            f"Quantity:   `{result['qty']:.6f}`\n"
-            f"Order ID:   `{result['order_id']}`\n"
-            f"Time:       `{ts_now()}`\n\n"
-            "_Verify on Binance to confirm._"
-        )
-        return text, kb(
-            [("📋 History", "td_history"), ("🏠 Dashboard", "td_home")],
-        )
-
-    # Paper path
+def _save_trade(uid, symbol, side, mode, **extra):
     trades = _load("trades")
     tid = f"TRADE_{uid}_{int(datetime.now(timezone.utc).timestamp())}"
-    trades[tid] = {
-        "trade_id":    tid,
-        "user_id":     int(uid),
-        "symbol":      symbol,
-        "side":        side.upper(),
-        "type":        "MANUAL",
-        "mode":        "PAPER",
-        "order_type":  "MARKET",
-        "status":      "OPEN",
-        "entry_price": 0,
-        "qty":         0,
-        "pnl":         0,
-        "created_at":  datetime.now(timezone.utc).isoformat(),
+    rec = {
+        "trade_id": tid, "user_id": int(uid), "symbol": symbol,
+        "side": side.upper(), "type": "MANUAL", "mode": mode,
+        "order_type": "MARKET", "status": "OPEN",
+        "entry_price": 0, "qty": 0, "pnl": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    rec.update(extra)
+    trades[tid] = rec
     _save("trades", trades)
 
-    emoji = "🟢" if side == "buy" else "🔴"
-    text = (
-        "✅ *Paper Order Placed*\n\n"
-        f"{emoji} {side.upper()} `{symbol}`\n"
-        f"Status: `Filled (Paper)`\n"
-        f"Time:   `{ts_now()}`\n\n"
-        "_No real funds — paper trade._"
-    )
-    return text, kb(
-        [("📋 History", "td_history"), ("🏠 Dashboard", "td_home")],
-    )
+
+def screen_filled(side, symbol, uid):
+    cls = asset_class(symbol)
+
+    # ── CRYPTO via Binance ──
+    if cls == "crypto":
+        live = BINANCE_LOADED and is_live_mode(uid) and has_binance(uid)
+        if live:
+            c = get_binance_client(uid)
+            if side == "buy":
+                usdt = c.get_balance("USDT")
+                size = calc_trade_size_usd(usdt)
+                if usdt < size:
+                    return (f"❌ Need {fmt_usd(size)} USDT, have {fmt_usd(usdt)}.",
+                            kb([("⬅️ Back", "td_manual")]))
+                r = c.place_market_buy(symbol, size)
+            else:
+                asset = to_binance_symbol(symbol).replace("USDT", "")
+                qty = c.get_balance(asset)
+                if qty <= 0:
+                    return (f"❌ No {asset} to sell.", kb([("⬅️ Back", "td_manual")]))
+                r = c.place_market_sell(symbol, qty)
+            if not r.get("success"):
+                return (f"❌ *Order Failed*\n\n`{r.get('error')}`\n\n_No funds moved._",
+                        kb([("📋 History", "td_history"), ("⬅️ Back", "td_manual")]))
+            _save_trade(uid, r["symbol"], side, "LIVE",
+                        binance_order_id=r["order_id"],
+                        entry_price=r["fill_price"], qty=r["qty"],
+                        status="OPEN" if side == "buy" else "CLOSED")
+            return (
+                "✅ *LIVE Order Filled!*\n\n"
+                f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
+                f"Fill: `{fmt_usd(r['fill_price'])}`\n"
+                f"Qty:  `{r['qty']:.6f}`\n"
+                f"ID:   `{r['order_id']}`\n\n_Verify on Binance._",
+                kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+            )
+        else:
+            _save_trade(uid, symbol, side, "PAPER")
+            return (
+                "✅ *Paper Order Placed*\n\n"
+                f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{symbol}`\n"
+                "Status: `Filled (Paper)`\n\n_Enable Live Mode for real orders._",
+                kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+            )
+
+    # ── STOCK via Alpaca (paper account = safe) ──
+    elif cls == "stock":
+        if not has_alpaca(uid):
+            return ("🔗 Connect Alpaca first.",
+                    kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_manual")]))
+        c, paper = get_alpaca_client(uid)
+        if not c:
+            return ("⚠️ Alpaca client error.", kb([("⬅️ Back", "td_manual")]))
+        if side == "buy":
+            cash = c.get_cash()
+            size = alpaca_trade_size(cash)
+            r = c.place_market_buy(symbol, size)
+        else:
+            r = c.place_market_sell(symbol)
+        if not r.get("success"):
+            return (f"❌ *Alpaca Order Failed*\n\n`{r.get('error')}`\n\n"
+                    "_Market may be closed — try during US hours,_\n"
+                    "_or order will queue for next open._",
+                    kb([("📋 History", "td_history"), ("⬅️ Back", "td_manual")]))
+        _save_trade(uid, r["symbol"], side, "ALPACA",
+                    alpaca_order_id=r.get("order_id"),
+                    entry_price=r.get("fill_price", 0), qty=r.get("qty", 0),
+                    status="OPEN" if side == "buy" else "CLOSED")
+        return (
+            f"✅ *Alpaca Order Placed* {'(paper)' if paper else '(live)'}\n\n"
+            f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
+            f"Order ID: `{r.get('order_id','—')}`\n"
+            f"Time: `{ts_now()}`\n\n_Real Alpaca order flow, fake money._",
+            kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+        )
+    else:
+        return ("⚠️ Unknown symbol.", kb([("⬅️ Back", "td_manual")]))
 
 
 # ─── /trading COMMAND ────────────────────────────────────────────────────────
 async def cmd_trading_dashboard(update, ctx):
     uid = str(update.effective_user.id)
     text, keyboard = screen_trading_home(uid)
-    await update.message.reply_text(
-        text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
-    )
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 
 # ─── CALLBACK ROUTER ─────────────────────────────────────────────────────────
@@ -660,7 +634,6 @@ async def handle_trading_callbacks(update, ctx):
     await query.answer()
     data = query.data
     uid = str(query.from_user.id)
-
     text, keyboard = None, None
 
     if   data == "td_home":     text, keyboard = screen_trading_home(uid)
@@ -670,49 +643,34 @@ async def handle_trading_callbacks(update, ctx):
     elif data == "td_history":  text, keyboard = screen_history(uid)
     elif data == "td_stats":    text, keyboard = screen_stats(uid)
     elif data == "td_settings": text, keyboard = screen_settings(uid)
-
-    elif data == "settings_verify":        text, keyboard = screen_verify(uid)
-    elif data == "settings_toggle_mode":   text, keyboard = screen_toggle_mode(uid)
-    elif data == "settings_confirm_live":  text, keyboard = screen_confirm_live(uid)
+    elif data == "settings_verify":       text, keyboard = screen_verify(uid)
+    elif data == "settings_toggle_mode":  text, keyboard = screen_toggle_mode(uid)
+    elif data == "settings_confirm_live": text, keyboard = screen_confirm_live(uid)
     elif data == "settings_notif":
-        text = "🔔 *Notifications*\n\n✅ All Telegram alerts active."
+        text = "🔔 *Notifications*\n\n✅ All alerts active."
         keyboard = kb([("⬅️ Settings", "td_settings")])
-
     elif data.startswith("mt_"):
         text, keyboard = screen_trade_detail(data[3:], uid)
-
     elif data.startswith("exec_buy_"):
         text, keyboard = screen_confirm("buy", data[9:], uid)
     elif data.startswith("exec_sell_"):
         text, keyboard = screen_confirm("sell", data[10:], uid)
-
     elif data.startswith("confirm_buy_"):
         text, keyboard = screen_filled("buy", data[12:], uid)
     elif data.startswith("confirm_sell_"):
         text, keyboard = screen_filled("sell", data[13:], uid)
-
     elif data == "bot_start":
-        text = ("🤖 *Bot Starting...*\n\n"
-                "⚠️ Auto engine is Phase 4.\n"
-                "Use Manual Trade for now.")
+        text = "🤖 *Auto engine ships Phase 4.*\nUse Manual Trade."
         keyboard = kb([("⬅️ Back", "td_auto")])
     elif data == "bot_config":
-        text = (
-            "🔧 *Bot Configuration*\n\n"
-            "├ Risk/Trade:  `1%`\n"
-            f"├ Max/Trade:   `${MAX_USD_PER_TRADE}`\n"
-            "├ Stop Loss:   `2%`\n"
-            "├ Take Profit: `3%`\n"
-            "└ Symbols:     `BTC, ETH, BNB, SOL`"
-        )
+        text = (f"🔧 *Config*\n├ Risk 1%\n├ Max ${MAX_USD_PER_TRADE}\n"
+                "├ SL 2% · TP 3%\n└ BTC/ETH/BNB/SOL + stocks")
         keyboard = kb([("⬅️ Back", "td_auto")])
 
     if text is None:
-        return
+        return  # not ours — let host bot handle (back_home, trading_menu, etc.)
 
     try:
-        await query.edit_message_text(
-            text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN
-        )
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        logger.warning(f"edit_message_text failed: {e}")
+        logger.warning(f"edit failed: {e}")
