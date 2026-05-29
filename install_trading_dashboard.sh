@@ -1,21 +1,22 @@
 #!/bin/bash
-# OpenAsset — Install Strategy Lab + Alpaca + dashboard fixes
+# OpenAsset — Install Strategy Lab + OANDA + Web Admin + dashboard fixes
 set -e
 BOT="/root/openasset_club/telegram_bot"
 M="$BOT/main.py"
 BK="$BOT/main.py.bak.$(date +%Y%m%d_%H%M%S)"
 
 echo "═══════════════════════════════════════════════"
-echo "  🏛 OpenAsset — Strategy Lab Installer"
+echo "  🏛 OpenAsset — Full Platform Installer"
 echo "═══════════════════════════════════════════════"
 
 # 0. Required files in repo?
 for f in trading_dashboard.py binance_client.py alpaca_client.py \
-         openasset_feeds.py openasset_engine.py; do
+         openasset_feeds.py openasset_engine.py oanda_client.py \
+         web_api.py web_admin.html web_service.sh; do
     [ -f "$f" ] || { echo "❌ Missing $f — git pull first"; exit 1; }
 done
 [ -f "$M" ] || { echo "❌ main.py not found"; exit 1; }
-echo "✅ All 5 modules present"
+echo "✅ All 8 modules present"
 
 # 1. Dependencies
 echo ""; echo "🔄 Step 1: Python deps..."
@@ -28,12 +29,17 @@ python3 -c "import yfinance" 2>/dev/null \
 python3 -c "import requests" 2>/dev/null \
     && echo "✅ requests present" \
     || { pip install requests --break-system-packages -q && echo "✅ requests installed"; }
+python3 -c "import fastapi, uvicorn" 2>/dev/null \
+    && echo "✅ fastapi+uvicorn present" \
+    || { pip install fastapi uvicorn --break-system-packages -q && echo "✅ fastapi+uvicorn installed"; }
 
 # 2. Copy modules
 echo ""; echo "🔄 Step 2: Copy modules..."
 cp trading_dashboard.py binance_client.py alpaca_client.py \
-   openasset_feeds.py openasset_engine.py "$BOT/"
-echo "✅ Copied 5 modules"
+   openasset_feeds.py openasset_engine.py oanda_client.py "$BOT/"
+# Web files stay in the repo directory (web_api.py reads from there)
+cp web_api.py web_admin.html web_service.sh /root/openasset-trading-bot/ 2>/dev/null || true
+echo "✅ Copied 6 bot modules + 3 web files"
 
 # 3. Patch main.py menu buttons (idempotent)
 echo ""; echo "🔄 Step 3: Patching main.py menus..."
@@ -114,10 +120,13 @@ fi
 
 echo ""
 echo "═══════════════════════════════════════════════"
-echo "  ✅ DONE — Strategy Lab is live"
+echo "  ✅ DONE — Full Platform Installed"
 echo "═══════════════════════════════════════════════"
-echo "  Test in @openasset_club_bot:"
-echo "   • /trading → tap 🏛 Strategy Lab"
-echo "   • Pick Crypto → BTC → BUY \$50 → auto SL/TP set"
-echo "   • Help / FAQ / Guide → Back buttons now work"
+echo "  Telegram Bot — @openasset_club_bot:"
+echo "   • /trading → 🏛 Strategy Lab (40+ assets)"
+echo "   • OANDA forex: connect via Trading Menu → OANDA"
+echo "   • back_home / Help / Guide Back buttons fixed"
+echo ""
+echo "  Web Admin Dashboard:"
+bash /root/openasset-trading-bot/web_service.sh start 2>/dev/null || true
 echo ""
