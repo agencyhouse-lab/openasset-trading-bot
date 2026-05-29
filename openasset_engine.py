@@ -37,7 +37,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional, Dict, List
 
-from openasset_feeds import get_price, get_symbol_info, asset_class_of
+from openasset_feeds import (
+    get_price, get_symbol_info, asset_class_of,
+    get_market_status, format_time_until,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +149,15 @@ def place_market_buy(uid: str, symbol: str, usd_amount: float) -> dict:
 
     price = get_price(symbol)
     if price <= 0:
-        return {"success": False, "error": f"Price feed unavailable for {symbol}"}
+        if cls != "crypto":
+            status = get_market_status(cls)
+            if not status["is_open"]:
+                tu = format_time_until(status["opens_in_minutes"])
+                return {"success": False,
+                        "error": (f"📅 {status['market_name']} is closed.\n"
+                                  f"Opens in {tu} ({status['opens_at_str']}).")}
+        return {"success": False,
+                "error": f"Price feed temporarily unavailable for {symbol}. Try again in a moment."}
 
     with _LOCK:
         data = _load()
@@ -207,9 +218,18 @@ def place_market_buy(uid: str, symbol: str, usd_amount: float) -> dict:
 
 def close_position(uid: str, symbol: str, reason: str = "MANUAL") -> dict:
     symbol = symbol.upper()
+    cls = asset_class_of(symbol)
     price = get_price(symbol)
     if price <= 0:
-        return {"success": False, "error": f"Price feed unavailable for {symbol}"}
+        if cls and cls != "crypto":
+            status = get_market_status(cls)
+            if not status["is_open"]:
+                tu = format_time_until(status["opens_in_minutes"])
+                return {"success": False,
+                        "error": (f"📅 {status['market_name']} is closed.\n"
+                                  f"Opens in {tu} ({status['opens_at_str']}).")}
+        return {"success": False,
+                "error": f"Price feed temporarily unavailable for {symbol}."}
 
     with _LOCK:
         data = _load()

@@ -146,20 +146,38 @@ def _fetch_crypto(coingecko_id: str) -> float:
 
 
 def _fetch_yfinance(yf_symbol: str) -> float:
-    """yfinance for everything non-crypto. Uses fast_info to avoid heavy queries."""
-    import yfinance as yf  # lazy import — only when needed
+    """yfinance for non-crypto. Three fallbacks for off-hours reliability."""
+    import yfinance as yf  # lazy import
     t = yf.Ticker(yf_symbol)
-    # fast_info is the lightweight path
+
+    # Path 1: fast_info.last_price (cheapest, sometimes None outside hours)
     try:
-        price = t.fast_info.last_price
-        if price and price > 0:
-            return float(price)
+        p = t.fast_info.last_price
+        if p and float(p) > 0:
+            return float(p)
     except Exception:
         pass
-    # Fallback: 1-day history
-    hist = t.history(period="1d", interval="1m")
-    if not hist.empty:
-        return float(hist["Close"].iloc[-1])
+
+    # Path 2: 5-day daily history → handles weekends/holidays
+    try:
+        hist = t.history(period="5d", interval="1d")
+        if hist is not None and not hist.empty and "Close" in hist:
+            p = float(hist["Close"].iloc[-1])
+            if p > 0:
+                return p
+    except Exception as e:
+        logger.debug(f"yf 5d failed for {yf_symbol}: {e}")
+
+    # Path 3: 1-day intraday → freshest during market hours
+    try:
+        hist = t.history(period="1d", interval="5m")
+        if hist is not None and not hist.empty:
+            p = float(hist["Close"].iloc[-1])
+            if p > 0:
+                return p
+    except Exception:
+        pass
+
     return 0.0
 
 
@@ -191,3 +209,108 @@ CLASS_LABEL = {
     "commodity": "Commodities",
     "index":     "Indexes",
 }
+
+
+# ─── Market hours detection ─────────────────────────────────────────────────
+from datetime import timedelta
+
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except ImportError:
+    _ET = None  # fallback to fixed UTC-5 (no DST awareness)
+
+
+def _now_et():
+    if _ET:
+        from datetime import datetime
+        return datetime.now(_ET)
+    from datetime import datetime, timezone
+    return datetime.now(timezone(timedelta(hours=-5)))
+
+
+def _next_us_equity_open(now):
+    """Next NYSE open: 9:30 AM ET on next weekday."""
+    candidate = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    if now >= candidate:
+        candidate += timedelta(days=1)
+    while candidate.weekday() >= 5:  # skip Sat/Sun
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def _next_forex_open(now):
+    """Forex opens Sun 5:00 PM ET."""
+    days_until_sun = (6 - now.weekday()) % 7
+    candidate = (now + timedelta(days=days_until_sun)).replace(
+        hour=17, minute=0, second=0, microsecond=0
+    )
+    if candidate <= now:
+        candidate += timedelta(days=7)
+    return candidate
+
+
+def get_market_status(asset_class: str) -> dict:
+    """
+    Returns {is_open: bool, market_name: str, opens_in_minutes: int, opens_at_str: str}
+    """
+    if asset_class == "crypto":
+        return {"is_open": True, "market_name": "Crypto (24/7)",
+                "opens_in_minutes": 0, "opens_at_str": "always open"}
+
+    now = _now_et()
+
+    # US equities: 9:30-16:00 ET, Mon-Fri
+    if asset_class in ("stock", "etf", "index"):
+        is_weekday = now.weekday() < 5
+        open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        if is_weekday and open_t <= now < close_t:
+            return {"is_open": True, "market_name": "US Stock Market",
+                    "opens_in_minutes": 0, "opens_at_str": "open now"}
+        nxt = _next_us_equity_open(now)
+        delta_min = int((nxt - now).total_seconds() / 60)
+        return {"is_open": False, "market_name": "US Stock Market",
+                "opens_in_minutes": delta_min,
+                "opens_at_str": nxt.strftime("%a %I:%M %p ET").lstrip("0")}
+
+    # Forex: Sun 5pm ET → Fri 5pm ET
+    if asset_class == "forex":
+        wd, hr = now.weekday(), now.hour
+        closed = (wd == 5) or (wd == 4 and hr >= 17) or (wd == 6 and hr < 17)
+        if not closed:
+            return {"is_open": True, "market_name": "Forex (24/5)",
+                    "opens_in_minutes": 0, "opens_at_str": "open now"}
+        nxt = _next_forex_open(now)
+        delta_min = int((nxt - now).total_seconds() / 60)
+        return {"is_open": False, "market_name": "Forex Market",
+                "opens_in_minutes": delta_min,
+                "opens_at_str": nxt.strftime("%a %I:%M %p ET").lstrip("0")}
+
+    # Commodities (CME futures): like forex but with daily 5-6pm ET break
+    if asset_class == "commodity":
+        wd, hr = now.weekday(), now.hour
+        weekend = (wd == 5) or (wd == 4 and hr >= 17) or (wd == 6 and hr < 18)
+        daily_break = (wd < 5) and (hr == 17)
+        if not (weekend or daily_break):
+            return {"is_open": True, "market_name": "CME Futures",
+                    "opens_in_minutes": 0, "opens_at_str": "open now"}
+        if daily_break:
+            nxt = now.replace(hour=18, minute=0, second=0, microsecond=0)
+        else:
+            nxt = _next_forex_open(now).replace(hour=18)
+        delta_min = int((nxt - now).total_seconds() / 60)
+        return {"is_open": False, "market_name": "CME Futures",
+                "opens_in_minutes": delta_min,
+                "opens_at_str": nxt.strftime("%a %I:%M %p ET").lstrip("0")}
+
+    return {"is_open": True, "market_name": "Unknown",
+            "opens_in_minutes": 0, "opens_at_str": ""}
+
+
+def format_time_until(minutes: int) -> str:
+    """Format minutes as 'X minutes' or 'Xh Ym'."""
+    if minutes < 60:
+        return f"{minutes} minutes"
+    hours, mins = divmod(minutes, 60)
+    return f"{hours}h" if mins == 0 else f"{hours}h {mins}m"
