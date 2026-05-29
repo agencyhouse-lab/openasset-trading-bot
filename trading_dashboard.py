@@ -61,6 +61,8 @@ try:
         list_symbols as oa_list_symbols, list_classes as oa_list_classes,
         display_name as oa_display, asset_class_of as oa_class_of,
         CLASS_EMOJI as OA_CLASS_EMOJI, CLASS_LABEL as OA_CLASS_LABEL,
+        get_market_status as oa_market_status,
+        format_time_until as oa_fmt_time,
     )
     STRATLAB_LOADED = True
 except ImportError as e:
@@ -869,10 +871,18 @@ def screen_oa_class(asset_class_name, uid):
                 kb([("⬅️ Back", "oa_menu")]))
     emoji = OA_CLASS_EMOJI.get(asset_class_name, "•")
     label = OA_CLASS_LABEL.get(asset_class_name, asset_class_name)
+    status = oa_market_status(asset_class_name)
+    if status["is_open"]:
+        market_line = f"🟢 *{status['market_name']}* — open\n"
+    else:
+        tu = oa_fmt_time(status["opens_in_minutes"])
+        market_line = (f"🔴 *{status['market_name']}* — closed\n"
+                       f"   opens in `{tu}` ({status['opens_at_str']})\n")
     text = (
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"{emoji} *{label}*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{market_line}\n"
         f"Pick a symbol to view:"
     )
     rows = []
@@ -898,9 +908,22 @@ def screen_oa_view(symbol, uid):
     cash = oa_cash(uid)
     pos = oa_get_pos(uid, symbol)
 
+    # Market status — shown upfront so user knows before tapping BUY
+    status = oa_market_status(cls)
+    if status["is_open"]:
+        market_line = f"🟢 *{status['market_name']}* — open"
+    else:
+        tu = oa_fmt_time(status["opens_in_minutes"])
+        market_line = (f"🔴 *{status['market_name']}* — closed\n"
+                       f"   opens in `{tu}` ({status['opens_at_str']})")
+
+    price_line = f"💲 Price: `{fmt_usd(price)}`" if price > 0 \
+                 else f"💲 Price: `—` _(unavailable while closed)_"
+
     pos_block = ""
     if pos:
-        cur_value = pos["qty"] * price
+        ref_price = price if price > 0 else pos["avg_entry"]
+        cur_value = pos["qty"] * ref_price
         cost = pos["qty"] * pos["avg_entry"]
         pnl = cur_value - cost
         sign = "+" if pnl >= 0 else ""
@@ -916,7 +939,8 @@ def screen_oa_view(symbol, uid):
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"{emoji} *{symbol}* · _{name}_\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💲 Price: `{fmt_usd(price)}`\n"
+        f"{market_line}\n\n"
+        f"{price_line}\n"
         f"💵 Your cash: `{fmt_usd(cash)}`\n"
         f"{pos_block}\n"
         "🛡 *Order defaults*\n"
@@ -924,10 +948,15 @@ def screen_oa_view(symbol, uid):
         f"├ Stop Loss:  `−{STOP_LOSS_PCT}%`\n"
         f"└ Take Profit:`+{TAKE_PROFIT_PCT}%`"
     )
-    rows = [[("🟢 BUY $50", f"oa_b_{symbol}")]]
+    rows = []
+    if status["is_open"] and price > 0:
+        rows.append([("🟢 BUY $50", f"oa_b_{symbol}")])
+    else:
+        rows.append([("⏳ Market Closed", f"oa_v_{symbol}")])  # tappable refresh
     if pos:
+        # Allow closing positions even when market closed (uses last-known price)
         rows.append([("🔴 Close Position", f"oa_s_{symbol}")])
-    rows.append([("⬅️ Back", f"oa_c_{cls}")])
+    rows.append([("🔄 Refresh", f"oa_v_{symbol}"), ("⬅️ Back", f"oa_c_{cls}")])
     return text, kb(*rows)
 
 
