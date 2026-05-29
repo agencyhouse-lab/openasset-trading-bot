@@ -310,9 +310,22 @@ def set_sl_tp(uid: str, symbol: str,
 
 
 def reset_account(uid: str) -> dict:
+    """
+    Reset to $10k starting balance.
+    Clears positions, stops, and pending orders.
+    PRESERVES trade history so users can review past performance.
+    """
     with _LOCK:
         data = _load()
-        data[str(uid)] = _new_account()
+        existing = data.get(str(uid), {})
+        preserved_trades = existing.get("trades", [])
+        preserved_orders = existing.get("orders", [])
+        data[str(uid)] = {
+            **_new_account(),
+            "trades": preserved_trades,   # keep history
+            "orders": preserved_orders,   # keep order log
+            "reset_at": datetime.now(timezone.utc).isoformat(),
+        }
         _save(data)
     return {"success": True, "starting_cash": STARTING_CASH}
 
