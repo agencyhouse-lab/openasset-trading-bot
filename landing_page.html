@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAsset Trading Bot - AI Auto-Trading SAAS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+        }
+
+        /* Navigation */
+        nav {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        nav .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        nav .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        nav a {
+            color: #333;
+            text-decoration: none;
+            margin: 0 1rem;
+            transition: color 0.3s;
+        }
+
+        nav a:hover {
+            color: #667eea;
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6rem 2rem;
+            text-align: center;
+        }
+
+        .hero .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+            font-weight: bold;
+        }
+
+        .hero p {
+            font-size: 1.3rem;
+            margin-bottom: 2rem;
+            opacity: 0.95;
+        }
+
+        .cta-button {
+            background: white;
+            color: #667eea;
+            padding: 1rem 2.5rem;
+            font-size: 1.1rem;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+            font-weight: bold;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        section {
+            padding: 4rem 2rem;
+        }
+
+        section h2 {
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 3rem;
+            color: #333;
+        }
+
+        /* Features Grid */
+        .features {
+            background: white;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            padding: 2rem;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+        }
+
+        .feature-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+
+        .feature-card p {
+            color: #666;
+            line-height: 1.8;
+        }
+
+        /* Stats Section */
+        .stats {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+        }
+
+        .stats .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+        }
+
+        .stat {
+            padding: 2rem;
+        }
+
+        .stat .number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat .label {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+
+        /* Pricing Section */
+        .pricing {
+            background: white;
+        }
+
+        .pricing-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .pricing-card {
+            background: white;
+            border: 2px solid #eee;
+            border-radius: 10px;
+            padding: 2rem;
+            text-align: center;
+            transition: transform 0.3s, border-color 0.3s;
+        }
+
+        .pricing-card:hover {
+            transform: translateY(-5px);
+            border-color: #667eea;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+        }
+
+        .pricing-card.featured {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            transform: scale(1.05);
+        }
+
+        .pricing-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        .price {
+            font-size: 2.5rem;
+            color: #667eea;
+            font-weight: bold;
+            margin: 1rem 0;
+        }
+
+        .pricing-card ul {
+            list-style: none;
+            margin: 1.5rem 0;
+            text-align: left;
+        }
+
+        .pricing-card ul li {
+            padding: 0.5rem 0;
+            color: #666;
+            border-bottom: 1px solid #eee;
+        }
+
+        .pricing-card ul li:before {
+            content: "✓ ";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        /* Platforms Section */
+        .platforms {
+            background: white;
+        }
+
+        .platforms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+
+        .platform {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            padding: 2rem;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .platform-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .platform h3 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            color: #333;
+        }
+
+        .platform p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        /* How It Works */
+        .how-it-works {
+            background: white;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .step {
+            text-align: center;
+        }
+
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin: 0 auto 1rem;
+        }
+
+        .step h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+
+        .step p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+
+        /* Footer */
+        footer {
+            background: #333;
+            color: white;
+            text-align: center;
+            padding: 2rem;
+        }
+
+        footer p {
+            margin-bottom: 0.5rem;
+        }
+
+        footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        /* Dashboard Link */
+        .dashboard-link {
+            text-align: center;
+            margin: 2rem 0;
+        }
+
+        .dashboard-link a {
+            background: #667eea;
+            color: white;
+            padding: 0.8rem 1.5rem;
+            border-radius: 50px;
+            text-decoration: none;
+            transition: background 0.3s;
+        }
+
+        .dashboard-link a:hover {
+            background: #764ba2;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
+            }
+
+            .hero p {
+                font-size: 1rem;
+            }
+
+            section h2 {
+                font-size: 1.8rem;
+            }
+
+            nav .container {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <div class="container">
+            <div class="logo">🤖 OpenAsset</div>
+            <div>
+                <a href="#features">Features</a>
+                <a href="#platforms">Platforms</a>
+                <a href="#pricing">Pricing</a>
+                <a href="#dashboard">Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <h1>AI Trading Bot That Works For You 24/7</h1>
+            <p>Auto-trade crypto, stocks, and forex with intelligent signals.<br>Zero experience needed. Risk-managed. Hands-off profits.</p>
+            <a href="#dashboard" class="cta-button">📊 View Dashboard</a>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features">
+        <div class="container">
+            <h2>Why OpenAsset?</h2>
+            <div class="features">
+                <div class="feature-card">
+                    <h3>🤖 AI Trading 24/7</h3>
+                    <p>Intelligent signals from RSI, MACD, and Bollinger Bands. Auto-executes trades while you sleep.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🛡️ Risk Managed</h3>
+                    <p>Max $50/trade. 0.5% stop-loss. 3% take-profit. Auto-closes positions. No surprises.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📱 Three Platforms</h3>
+                    <p>Trade crypto (Binance), stocks (Alpaca), and forex (OANDA) from one dashboard.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📊 Real-Time Dashboard</h3>
+                    <p>Watch live P&L, track wins/losses, monitor positions. Complete transparency.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>👥 Two Modes</h3>
+                    <p>Auto-trade (hands-off) for beginners. Signal mode (hands-on) for experienced traders.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📚 Full Education</h3>
+                    <p>Learn to connect accounts, read signals, manage risk, and withdraw profits safely.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats">
+        <div class="container">
+            <div class="stat">
+                <div class="number" id="stat-users">460+</div>
+                <div class="label">Active Users</div>
+            </div>
+            <div class="stat">
+                <div class="number" id="stat-trades">1000+</div>
+                <div class="label">Trades Executed</div>
+            </div>
+            <div class="stat">
+                <div class="number" id="stat-revenue">$50K+</div>
+                <div class="label">Revenue Generated</div>
+            </div>
+            <div class="stat">
+                <div class="number" id="stat-winrate">62%</div>
+                <div class="label">Average Win Rate</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Platforms Section -->
+    <section id="platforms">
+        <div class="container">
+            <h2>Trade Everywhere</h2>
+            <div class="platforms-grid">
+                <div class="platform">
+                    <div class="platform-icon">🔶</div>
+                    <h3>Binance Crypto</h3>
+                    <p>BTC, ETH, BNB, SOL. Real cryptocurrency trading with OCO orders.</p>
+                </div>
+                <div class="platform">
+                    <div class="platform-icon">📊</div>
+                    <h3>Alpaca Stocks</h3>
+                    <p>SPY, QQQ, GLD, USO. US equities and ETFs with bracket orders.</p>
+                </div>
+                <div class="platform">
+                    <div class="platform-icon">💱</div>
+                    <h3>OANDA Forex</h3>
+                    <p>EUR/USD, GBP/USD, Gold. Forex pairs and precious metals.</p>
+                </div>
+                <div class="platform">
+                    <div class="platform-icon">🏛️</div>
+                    <h3>Strategy Lab</h3>
+                    <p>$10,000 practice account. Test strategies risk-free.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works">
+        <div class="container">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h4>Connect Account</h4>
+                    <p>Paste API keys. Takes 5 minutes. No withdrawals needed.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h4>Enable AI Signals</h4>
+                    <p>One click. AI monitors 24/7. Checks every 60 minutes.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h4>Auto-Trade or Get Tips</h4>
+                    <p>Choose: hands-off (AI trades) or hands-on (you execute).</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h4>Watch & Withdraw</h4>
+                    <p>Monitor dashboard. Withdraw profits monthly. Repeat.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing">
+        <div class="container">
+            <h2>Simple Pricing</h2>
+            <div class="pricing-cards">
+                <div class="pricing-card">
+                    <h3>🎯 ATBOT</h3>
+                    <div class="price">$9.99<span style="font-size: 1rem;">/month</span></div>
+                    <ul>
+                        <li>Binance auto-trading</li>
+                        <li>AI signals</li>
+                        <li>Dashboard access</li>
+                        <li>Trade history</li>
+                    </ul>
+                    <a href="#dashboard" class="cta-button">Get Started</a>
+                </div>
+                <div class="pricing-card">
+                    <h3>🎯 BTBOT</h3>
+                    <div class="price">$9.99<span style="font-size: 1rem;">/month</span></div>
+                    <ul>
+                        <li>Alpaca auto-trading</li>
+                        <li>AI signals</li>
+                        <li>Dashboard access</li>
+                        <li>Trade history</li>
+                    </ul>
+                    <a href="#dashboard" class="cta-button">Get Started</a>
+                </div>
+                <div class="pricing-card featured">
+                    <h3>⭐ COMPLETE</h3>
+                    <div class="price">$59.92<span style="font-size: 1rem;">/month</span></div>
+                    <ul>
+                        <li>All 3 platforms</li>
+                        <li>All AI signals</li>
+                        <li>Priority support</li>
+                        <li>Advanced stats</li>
+                        <li>Withdrawal tracker</li>
+                    </ul>
+                    <a href="#dashboard" class="cta-button">Get Started</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dashboard Link -->
+    <section id="dashboard">
+        <div class="container">
+            <div class="dashboard-link">
+                <h2>📊 Live Dashboard</h2>
+                <p>See real-time bot statistics, trades, and performance</p>
+                <br>
+                <a href="dashboard.html" class="cta-button">📊 Open Dashboard →</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 OpenAsset Trading Bot. All rights reserved.</p>
+        <p>Telegram: <a href="https://t.me/openasset_club_bot">@openasset_club_bot</a></p>
+        <p><small>This is not financial advice. Trading involves risk. Manage your capital.</small></p>
+    </footer>
+
+    <script>
+        // Fetch and update stats
+        async function updateStats() {
+            try {
+                const response = await fetch('http://72.62.254.237:9000/api/public/stats');
+                const data = await response.json();
+                
+                // Update numbers
+                document.getElementById('stat-users').textContent = 
+                    data.platform.total_users + '+';
+                document.getElementById('stat-trades').textContent = 
+                    data.platform.total_trades_executed + '+';
+                document.getElementById('stat-revenue').textContent = 
+                    '$' + data.platform.total_revenue_usd.toLocaleString() + '+';
+                document.getElementById('stat-winrate').textContent = 
+                    data.platform.average_win_rate;
+            } catch (error) {
+                console.log('Stats API unavailable (bot might be offline)');
+            }
+        }
+
+        // Update stats on load
+        updateStats();
+
+        // Refresh stats every 30 seconds
+        setInterval(updateStats, 30000);
+    </script>
+</body>
+</html>

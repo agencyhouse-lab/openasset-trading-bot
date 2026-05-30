@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAsset Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 2rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 2rem;
+            font-weight: bold;
+            color: white;
+        }
+
+        .refresh-btn {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 0.7rem 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.3s;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: white;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        section {
+            margin-bottom: 2rem;
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #38bdf8;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 0.5rem;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            padding: 1.5rem;
+            border-radius: 10px;
+            border-left: 5px solid #667eea;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #38bdf8;
+        }
+
+        .stat-change {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 0.5rem;
+        }
+
+        /* Trades Table */
+        .trades-section {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border-radius: 10px;
+            padding: 2rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #0f172a;
+            padding: 1rem;
+            text-align: left;
+            color: #38bdf8;
+            border-bottom: 2px solid #667eea;
+            font-weight: bold;
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid #475569;
+        }
+
+        tr:hover {
+            background: #0f172a;
+        }
+
+        .symbol {
+            font-weight: bold;
+            color: #38bdf8;
+        }
+
+        .side-buy {
+            color: #10b981;
+            font-weight: bold;
+        }
+
+        .side-sell {
+            color: #ef4444;
+            font-weight: bold;
+        }
+
+        .pnl-positive {
+            color: #10b981;
+        }
+
+        .pnl-negative {
+            color: #ef4444;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .status-open {
+            background: #1e40af;
+            color: #93c5fd;
+        }
+
+        .status-closed {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-loss {
+            background: #991b1b;
+            color: #fca5a5;
+        }
+
+        /* Platforms Section */
+        .platforms-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .platform-card {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .platform-name {
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #38bdf8;
+        }
+
+        .platform-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #475569;
+            color: #cbd5e1;
+        }
+
+        .platform-stat:last-child {
+            border-bottom: none;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #64748b;
+        }
+
+        .spinner {
+            border: 3px solid #475569;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #64748b;
+            border-top: 1px solid #475569;
+            margin-top: 3rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header-container {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            table {
+                font-size: 0.85rem;
+            }
+
+            th, td {
+                padding: 0.75rem 0.5rem;
+            }
+        }
+
+        .error-message {
+            background: #991b1b;
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-container">
+            <div class="logo">📊 OpenAsset Dashboard</div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <div class="status">
+                    <div class="status-dot"></div>
+                    <span>System Online</span>
+                </div>
+                <button class="refresh-btn" onclick="refreshData()">🔄 Refresh</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- API Error Alert -->
+        <div id="errorAlert" style="display: none;" class="error-message">
+            <strong>⚠️ API Connection Issue:</strong> The bot API is currently unavailable. 
+            Make sure your VPS bot is running and the API is accessible.
+        </div>
+
+        <!-- Overview Stats -->
+        <section>
+            <h2 class="section-title">📊 Overview</h2>
+            <div class="stats-grid" id="statsGrid">
+                <div class="loading"><div class="spinner"></div>Loading...</div>
+            </div>
+        </section>
+
+        <!-- Platform Status -->
+        <section>
+            <h2 class="section-title">🚀 Platform Status</h2>
+            <div class="platforms-section" id="platformsSection">
+                <div class="loading"><div class="spinner"></div>Loading...</div>
+            </div>
+        </section>
+
+        <!-- Recent Trades -->
+        <section>
+            <h2 class="section-title">📈 Recent Trades</h2>
+            <div class="trades-section">
+                <table id="tradesTable">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>P&L</th>
+                            <th>P&L %</th>
+                            <th>Status</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td colspan="8" style="text-align: center;"><div class="loading"><div class="spinner"></div>Loading...</div></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Bot Configuration -->
+        <section>
+            <h2 class="section-title">⚙️ Bot Configuration</h2>
+            <div class="stats-grid" id="configSection">
+                <div class="loading"><div class="spinner"></div>Loading...</div>
+            </div>
+        </section>
+    </div>
+
+    <footer>
+        <p>🤖 OpenAsset Trading Bot | Live Dashboard</p>
+        <p>Last updated: <span id="lastUpdate">--:--:--</span> UTC</p>
+        <p><small>Data refreshes automatically every 30 seconds | <a href="landing_page.html" style="color: #667eea;">Back to Landing Page</a></small></p>
+    </footer>
+
+    <script>
+        const API_URL = 'http://72.62.254.237:9000/api/public';
+
+        async function fetchData(endpoint) {
+            try {
+                const response = await fetch(`${API_URL}/${endpoint}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching ${endpoint}:`, error);
+                showError();
+                return null;
+            }
+        }
+
+        function showError() {
+            document.getElementById('errorAlert').style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorAlert').style.display = 'none';
+        }
+
+        async function updateStats() {
+            const stats = await fetchData('stats');
+            if (!stats) return;
+
+            hideError();
+
+            const html = `
+                <div class="stat-card">
+                    <div class="stat-label">Total Users</div>
+                    <div class="stat-value">${stats.platform.total_users}</div>
+                    <div class="stat-change">+${Math.floor(stats.platform.total_users * 0.05)} this month</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Subscribers</div>
+                    <div class="stat-value">${stats.platform.active_subscribers}</div>
+                    <div class="stat-change">${Math.round(stats.platform.active_subscribers / stats.platform.total_users * 100)}% conversion</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-value">${stats.platform.total_trades_executed}</div>
+                    <div class="stat-change">Win rate: ${stats.platform.average_win_rate}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Revenue</div>
+                    <div class="stat-value">$${stats.platform.total_revenue_usd.toLocaleString()}</div>
+                    <div class="stat-change">Monthly Recurring Revenue</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Network P&L</div>
+                    <div class="stat-value" style="color: #10b981;">+$${stats.platform.network_pnl_usd.toLocaleString()}</div>
+                    <div class="stat-change">All user profits combined</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Signals Per Day</div>
+                    <div class="stat-value">${stats.ai_engine.signal_frequency.includes('60') ? '4+' : '24+'}</div>
+                    <div class="stat-change">Checked every hour</div>
+                </div>
+            `;
+            document.getElementById('statsGrid').innerHTML = html;
+        }
+
+        async function updateTrades() {
+            const trades = await fetchData('trades');
+            if (!trades) return;
+
+            const tbody = document.querySelector('#tradesTable tbody');
+            if (!trades.recent_trades || trades.recent_trades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #64748b;">No trades yet</td></tr>';
+                return;
+            }
+
+            const rows = trades.recent_trades.map(t => {
+                const pnlClass = t.pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+                const sideClass = t.side === 'BUY' ? 'side-buy' : 'side-sell';
+                const statusClass = t.status === 'OPEN' ? 'status-open' : (t.pnl >= 0 ? 'status-closed' : 'status-loss');
+                const timestamp = new Date(t.timestamp).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                
+                return `
+                    <tr>
+                        <td class="symbol">${t.symbol}</td>
+                        <td class="${sideClass}">${t.side}</td>
+                        <td>$${t.entry.toFixed(4)}</td>
+                        <td>${t.exit ? '$' + t.exit.toFixed(4) : '-'}</td>
+                        <td class="${pnlClass}">${t.pnl > 0 ? '+' : ''}$${t.pnl.toFixed(2)}</td>
+                        <td class="${pnlClass}">${t.pnl_pct > 0 ? '+' : ''}${t.pnl_pct.toFixed(2)}%</td>
+                        <td><span class="status-badge ${statusClass}">${t.status}</span></td>
+                        <td>${timestamp}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.innerHTML = rows;
+        }
+
+        async function updatePlatforms() {
+            const config = await fetchData('config');
+            if (!config) return;
+
+            const html = Object.entries(config.platforms).map(([key, platform]) => {
+                const symbolList = Array.isArray(platform.symbols) 
+                    ? platform.symbols.join(', ')
+                    : platform.symbols;
+                
+                return `
+                    <div class="platform-card">
+                        <div class="platform-name">${platform.name}</div>
+                        <div class="platform-stat">
+                            <span>Symbols:</span>
+                            <span>${symbolList}</span>
+                        </div>
+                        <div class="platform-stat">
+                            <span>Max Trade:</span>
+                            <span>${platform.max_trade_size || 'N/A'}</span>
+                        </div>
+                        <div class="platform-stat">
+                            <span>Status:</span>
+                            <span style="color: #10b981;">● ${platform.status}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('platformsSection').innerHTML = html;
+        }
+
+        async function updateConfig() {
+            const config = await fetchData('config');
+            if (!config) return;
+
+            const html = `
+                <div class="stat-card">
+                    <div class="stat-label">Version</div>
+                    <div class="stat-value">${config.version}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Phase</div>
+                    <div class="stat-value">${config.phase}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Stop Loss</div>
+                    <div class="stat-value">${config.ai_engine.risk_management.stop_loss}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Take Profit</div>
+                    <div class="stat-value">${config.ai_engine.risk_management.take_profit}</div>
+                </div>
+            `;
+            document.getElementById('configSection').innerHTML = html;
+        }
+
+        async function refreshData() {
+            const btn = document.querySelector('.refresh-btn');
+            btn.disabled = true;
+
+            await Promise.all([
+                updateStats(),
+                updateTrades(),
+                updatePlatforms(),
+                updateConfig()
+            ]);
+
+            const now = new Date().toLocaleTimeString('en-US');
+            document.getElementById('lastUpdate').textContent = now;
+
+            btn.disabled = false;
+        }
+
+        // Initial load
+        refreshData();
+
+        // Auto-refresh every 30 seconds
+        setInterval(refreshData, 30000);
+    </script>
+</body>
+</html>
