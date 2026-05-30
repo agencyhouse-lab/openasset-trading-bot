@@ -374,97 +374,242 @@ def _signal_loop():
                     if not config.get("enabled"):
                         continue
                     
-                    if config.get("mode") != "stratlab":
-                        continue  # only support stratlab for now
-                    
+                    mode = config.get("mode", "stratlab")
                     symbols = config.get("symbols", [])
                     position_size = config.get("position_size", 50.0)
                     
-                    # Check if user already has max positions
-                    positions = account.get("positions", {})
-                    if len(positions) >= 3:
-                        continue
-                    
-                    # Generate signals for each symbol
-                    for symbol in symbols:
-                        if symbol in positions:
-                            continue  # already holding
+                    # ─── STRATEGY LAB MODE ──────────────────────────────────────
+                    if mode == "stratlab":
+                        # Check if user already has max positions
+                        positions = account.get("positions", {})
+                        if len(positions) >= 3:
+                            continue
                         
+                        # Generate signals for each symbol
+                        for symbol in symbols:
+                            if symbol in positions:
+                                continue  # already holding
+                            
+                            try:
+                                # Fetch last 50 hours of price data
+                                from openasset_feeds import get_historical_prices
+                                prices = get_historical_prices(symbol, period=50)
+                                if not prices or len(prices) < 20:
+                                    continue
+                                
+                                # Generate signal
+                                signal = sig_gen.generate_signal(symbol, prices)
+                                if not signal:
+                                    continue
+                                
+                                # Only BUY signals for now (long-only)
+                                if signal != "BUY":
+                                    continue
+                                
+                                # Check cash
+                                cash = account.get("cash", 0)
+                                if cash < position_size:
+                                    continue
+                                
+                                # Execute trade in Strategy Lab
+                                p = get_price(symbol)
+                                if p <= 0:
+                                    continue
+                                
+                                qty = position_size / p
+                                entry = p
+                                
+                                # Update account
+                                account["positions"][symbol] = {
+                                    "qty": qty,
+                                    "avg_entry": entry,
+                                    "side": "LONG",
+                                    "opened_at": datetime.now(timezone.utc).isoformat(),
+                                    "source": "AI_SIGNAL",
+                                }
+                                
+                                # Set SL/TP
+                                sl_pct = config.get("stop_loss_pct", 0.5)
+                                tp_pct = config.get("take_profit_pct", 3.0)
+                                sl_price = entry * (1 - sl_pct / 100)
+                                tp_price = entry * (1 + tp_pct / 100)
+                                
+                                account["stops"][symbol] = {
+                                    "stop_loss": sl_price,
+                                    "take_profit": tp_price,
+                                    "entry": entry,
+                                    "sl_pct": sl_pct,
+                                    "tp_pct": tp_pct,
+                                }
+                                
+                                account["cash"] -= position_size
+                                
+                                # Log the signal
+                                account.setdefault("trades", []).append({
+                                    "symbol": symbol,
+                                    "side": "AI_BUY",
+                                    "qty": qty,
+                                    "entry": entry,
+                                    "sl_price": sl_price,
+                                    "tp_price": tp_price,
+                                    "ts": datetime.now(timezone.utc).isoformat(),
+                                    "source": "AI_SIGNAL",
+                                })
+                                
+                                record_signal(uid, symbol, signal, entry, action="executed")
+                                
+                                logger.info(
+                                    f"AI Signal: BUY {symbol} for uid={uid} @ {entry:.4f} "
+                                    f"| SL={sl_price:.4f} | TP={tp_price:.4f}"
+                                )
+                            
+                            except Exception as e:
+                                logger.error(f"Signal processing error for {symbol}: {e}")
+                    
+                    # ─── BINANCE LIVE MODE ──────────────────────────────────────
+                    elif mode == "binance":
                         try:
-                            # Fetch last 50 hours of price data
-                            from openasset_feeds import get_historical_prices
-                            prices = get_historical_prices(symbol, period=50)
-                            if not prices or len(prices) < 20:
+                            from binance_signal_executor import execute_binance_signal
+                            from binance_client import has_binance
+                            
+                            if not has_binance(uid):
                                 continue
                             
-                            # Generate signal
-                            signal = sig_gen.generate_signal(symbol, prices)
-                            if not signal:
-                                continue
-                            
-                            # Only BUY signals for now (long-only)
-                            if signal != "BUY":
-                                continue
-                            
-                            # Check cash
-                            cash = account.get("cash", 0)
-                            if cash < position_size:
-                                continue
-                            
-                            # Execute trade
-                            p = get_price(symbol)
-                            if p <= 0:
-                                continue
-                            
-                            qty = position_size / p
-                            entry = p
-                            
-                            # Update account
-                            account["positions"][symbol] = {
-                                "qty": qty,
-                                "avg_entry": entry,
-                                "side": "LONG",
-                                "opened_at": datetime.now(timezone.utc).isoformat(),
-                                "source": "AI_SIGNAL",
-                            }
-                            
-                            # Set SL/TP
-                            sl_pct = config.get("stop_loss_pct", 0.5)
-                            tp_pct = config.get("take_profit_pct", 3.0)
-                            sl_price = entry * (1 - sl_pct / 100)
-                            tp_price = entry * (1 + tp_pct / 100)
-                            
-                            account["stops"][symbol] = {
-                                "stop_loss": sl_price,
-                                "take_profit": tp_price,
-                                "entry": entry,
-                                "sl_pct": sl_pct,
-                                "tp_pct": tp_pct,
-                            }
-                            
-                            account["cash"] -= position_size
-                            
-                            # Log the signal
-                            account.setdefault("trades", []).append({
-                                "symbol": symbol,
-                                "side": "AI_BUY",
-                                "qty": qty,
-                                "entry": entry,
-                                "sl_price": sl_price,
-                                "tp_price": tp_price,
-                                "ts": datetime.now(timezone.utc).isoformat(),
-                                "source": "AI_SIGNAL",
-                            })
-                            
-                            record_signal(uid, symbol, signal, entry, action="executed")
-                            
-                            logger.info(
-                                f"AI Signal: BUY {symbol} for uid={uid} @ {entry:.4f} "
-                                f"| SL={sl_price:.4f} | TP={tp_price:.4f}"
-                            )
+                            for symbol in symbols:
+                                try:
+                                    # Fetch price data
+                                    from openasset_feeds import get_historical_prices
+                                    prices = get_historical_prices(symbol, period=50)
+                                    if not prices or len(prices) < 20:
+                                        continue
+                                    
+                                    # Generate signal
+                                    signal = sig_gen.generate_signal(symbol, prices)
+                                    if not signal or signal != "BUY":
+                                        continue
+                                    
+                                    # Execute on Binance (convert symbol to Binance format)
+                                    binance_sym = f"{symbol}USDT"  # e.g., BTC → BTCUSDT
+                                    result = execute_binance_signal(uid, binance_sym, signal)
+                                    
+                                    if result.get("success"):
+                                        record_signal(uid, binance_sym, signal, 
+                                                    result.get("entry_price"), action="executed")
+                                        logger.info(f"Binance signal executed: {result.get('message')}")
+                                        # Notify admin
+                                        from main import notify_admin_async
+                                        notify_admin_async(
+                                            f"🤖 *AI LIVE Signal Executed* (BINANCE)\n"
+                                            f"User: `{uid}`\n"
+                                            f"🟢 BUY `{binance_sym}`\n"
+                                            f"Entry: `${result.get('entry_price', '—'):.4f}`\n"
+                                            f"SL: `${result.get('sl_price', '—'):.4f}`\n"
+                                            f"TP: `${result.get('tp_price', '—'):.4f}`"
+                                        )
+                                    else:
+                                        logger.warning(f"Binance signal failed: {result.get('message')}")
+                                
+                                except Exception as e:
+                                    logger.error(f"Binance signal {symbol} error: {e}")
                         
                         except Exception as e:
-                            logger.error(f"Signal processing error for {symbol}: {e}")
+                            logger.error(f"Binance mode error: {e}")
+                    
+                    # ─── ALPACA LIVE MODE ───────────────────────────────────────
+                    elif mode == "alpaca":
+                        try:
+                            from alpaca_signal_executor import execute_alpaca_signal
+                            from alpaca_client import has_alpaca
+                            
+                            if not has_alpaca(uid):
+                                continue
+                            
+                            for symbol in symbols:
+                                try:
+                                    # Fetch price data
+                                    from openasset_feeds import get_historical_prices
+                                    prices = get_historical_prices(symbol, period=50)
+                                    if not prices or len(prices) < 20:
+                                        continue
+                                    
+                                    # Generate signal
+                                    signal = sig_gen.generate_signal(symbol, prices)
+                                    if not signal or signal != "BUY":
+                                        continue
+                                    
+                                    # Execute on Alpaca
+                                    result = execute_alpaca_signal(uid, symbol, signal)
+                                    
+                                    if result.get("success"):
+                                        record_signal(uid, symbol, signal,
+                                                    result.get("entry_price"), action="executed")
+                                        logger.info(f"Alpaca signal executed: {result.get('message')}")
+                                        # Notify admin
+                                        from main import notify_admin_async
+                                        notify_admin_async(
+                                            f"🤖 *AI LIVE Signal Executed* (ALPACA)\n"
+                                            f"User: `{uid}`\n"
+                                            f"🟢 BUY `{symbol}`\n"
+                                            f"Entry: `${result.get('entry_price', '—'):.2f}`\n"
+                                            f"Qty: `{result.get('quantity', '—')}`\n"
+                                            f"Mode: `{result.get('account_type', '—')}`"
+                                        )
+                                    else:
+                                        logger.warning(f"Alpaca signal failed: {result.get('message')}")
+                                
+                                except Exception as e:
+                                    logger.error(f"Alpaca signal {symbol} error: {e}")
+                        
+                        except Exception as e:
+                            logger.error(f"Alpaca mode error: {e}")
+                    
+                    # ─── OANDA LIVE MODE ────────────────────────────────────────
+                    elif mode == "oanda":
+                        try:
+                            from oanda_signal_executor import execute_oanda_signal
+                            from oanda_client import has_oanda
+                            
+                            if not has_oanda(uid):
+                                continue
+                            
+                            for symbol in symbols:
+                                try:
+                                    # Fetch price data
+                                    from openasset_feeds import get_historical_prices
+                                    prices = get_historical_prices(symbol, period=50)
+                                    if not prices or len(prices) < 20:
+                                        continue
+                                    
+                                    # Generate signal
+                                    signal = sig_gen.generate_signal(symbol, prices)
+                                    if not signal or signal != "BUY":
+                                        continue
+                                    
+                                    # Execute on OANDA
+                                    result = execute_oanda_signal(uid, symbol, signal)
+                                    
+                                    if result.get("success"):
+                                        record_signal(uid, symbol, signal,
+                                                    result.get("entry_price"), action="executed")
+                                        logger.info(f"OANDA signal executed: {result.get('message')}")
+                                        # Notify admin
+                                        from main import notify_admin_async
+                                        notify_admin_async(
+                                            f"🤖 *AI LIVE Signal Executed* (OANDA)\n"
+                                            f"User: `{uid}`\n"
+                                            f"🟢 BUY `{symbol}`\n"
+                                            f"Entry: `{result.get('entry_price', '—'):.5f}`\n"
+                                            f"Units: `{result.get('units', '—')}`\n"
+                                            f"Mode: `{result.get('account_type', '—')}`"
+                                        )
+                                    else:
+                                        logger.warning(f"OANDA signal failed: {result.get('message')}")
+                                
+                                except Exception as e:
+                                    logger.error(f"OANDA signal {symbol} error: {e}")
+                        
+                        except Exception as e:
+                            logger.error(f"OANDA mode error: {e}")
                 
                 except Exception as e:
                     logger.error(f"Signal check error for uid={uid}: {e}")

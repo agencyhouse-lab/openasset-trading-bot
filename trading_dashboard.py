@@ -670,21 +670,65 @@ def screen_ai_config(uid):
     tp_pct = config.get("take_profit_pct", 3.0)
     mode = config.get("mode", "stratlab")
     
+    mode_emoji = {
+        "stratlab": "🏛",
+        "binance": "🔶",
+        "alpaca": "📊",
+        "oanda": "💱",
+    }.get(mode, "❓")
+    
     text = (
         "⚙️ *AI Signal Settings*\n\n"
+        f"Mode: `{mode_emoji} {mode.upper()}`\n"
         f"Position size: `${pos_size:.2f}`\n"
         f"Stop-loss: `{sl_pct}%`\n"
-        f"Take-profit: `{tp_pct}%`\n"
-        f"Mode: `{mode.upper()}`\n\n"
-        f"Tracked symbols: `{', '.join(symbols)}`\n\n"
-        "_Note: Only available for Strategy Lab. "
-        "Live mode support (Binance/Alpaca) coming in Phase 8._"
+        f"Take-profit: `{tp_pct}%`\n\n"
+        f"Tracked symbols: `{', '.join(symbols)}`"
     )
     
     return text, kb(
-        [("📊 Change symbols", "ai_symbols"), ("💰 Position size", "ai_position_size")],
-        [("🛑 Stop-loss %", "ai_stop_loss"), ("✅ Take-profit %", "ai_take_profit")],
+        [("🎯 Change Mode", "ai_mode_select"), ("💰 Position size", "ai_position_size")],
+        [("📊 Change symbols", "ai_symbols")],
         [("⬅️ Back", "ai_signals_menu")],
+    )
+
+
+def screen_ai_mode_select(uid):
+    """Select which platform for AI auto-trading."""
+    try:
+        from signal_engine import load_signal_config, save_signal_config
+    except ImportError:
+        return (
+            "⚠️ Signal engine unavailable.",
+            kb([("⬅️ Back", "ai_config")]),
+        )
+    
+    text = (
+        "🎯 *Select Trading Mode*\n\n"
+        "Where should AI auto-trading execute?\n\n"
+        "🏛 *Strategy Lab*\n"
+        "├ Practice trading, $10k balance\n"
+        "└ Perfect for testing signals\n\n"
+        "🔶 *Binance*\n"
+        "├ Real crypto (BTC, ETH, BNB, SOL)\n"
+        "├ Max $50 per signal\n"
+        "└ Live money only\n\n"
+        "📊 *Alpaca*\n"
+        "├ Real stocks (SPY, QQQ, etc)\n"
+        "├ Paper or Live accounts\n"
+        "└ Auto SL/TP bracket orders\n\n"
+        "💱 *OANDA*\n"
+        "├ Real forex (EUR/USD, etc)\n"
+        "├ Real metals & indices\n"
+        "└ Auto SL/TP with all units"
+    )
+    
+    return text, kb(
+        [("🏛 Strategy Lab", "ai_mode_set_stratlab")],
+        [("🔶 Binance", "ai_mode_set_binance")],
+        [("📊 Alpaca", "ai_mode_set_alpaca")],
+        [("💱 OANDA", "ai_mode_set_oanda")],
+        [("⬅️ Back", "ai_config")],
     )
 
 
@@ -1513,8 +1557,25 @@ async def handle_trading_callbacks(update, ctx):
     # AI Signals
     elif data == "ai_signals_menu":  text, keyboard = screen_ai_signals_menu(uid)
     elif data == "ai_config":        text, keyboard = screen_ai_config(uid)
+    elif data == "ai_mode_select":   text, keyboard = screen_ai_mode_select(uid)
     elif data == "ai_symbols":       text, keyboard = screen_ai_symbols(uid)
     elif data == "ai_history":       text, keyboard = screen_ai_history(uid)
+    elif data.startswith("ai_mode_set_"):
+        new_mode = data[12:]  # extract mode name
+        if new_mode in ["stratlab", "binance", "alpaca", "oanda"]:
+            try:
+                from signal_engine import load_signal_config, save_signal_config
+                config = load_signal_config(uid)
+                config["mode"] = new_mode
+                save_signal_config(uid, config)
+                text = (
+                    f"✅ *Mode Changed*\n\n"
+                    f"AI will now auto-trade on `{new_mode.upper()}`\n\n"
+                    f"Make sure your {new_mode.upper()} account is connected!"
+                )
+                keyboard = kb([("⚙️ Settings", "ai_config"), ("⬅️ Back", "ai_signals_menu")])
+            except Exception as e:
+                text, keyboard = (f"❌ Error: {e}", kb([("⬅️ Back", "ai_mode_select")]))
     elif data.startswith("ai_toggle_"):
         enabled = data == "ai_toggle_True"
         try:
