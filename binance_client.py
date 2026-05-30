@@ -240,6 +240,114 @@ class BinanceClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def place_market_buy_with_sl_tp(self, symbol: str, usd_amount: float,
+                                      sl_pct: float = 0.5, tp_pct: float = 3.0) -> dict:
+        """
+        Place market BUY with automatic SL/TP using OCO (One-Cancels-Other) order.
+        
+        Flow:
+          1. Place market BUY
+          2. Calculate SL price (entry * (1 - sl_pct/100))
+          3. Calculate TP price (entry * (1 + tp_pct/100))
+          4. Place OCO: SELL at SL or TP (whichever hits first)
+        
+        Returns:
+          {
+            "success": True,
+            "buy_order_id": int,
+            "oco_order_id": int,
+            "symbol": str,
+            "qty": float,
+            "entry_price": float,
+            "sl_price": float,
+            "tp_price": float,
+            "sl_pct": float,
+            "tp_pct": float
+          }
+          OR
+          {
+            "success": False,
+            "error": str,
+            "buy_order_id": int (if buy succeeded but OCO failed)
+          }
+        """
+        symbol = to_binance_symbol(symbol)
+        if symbol not in ALLOWED_SYMBOLS:
+            return {"success": False, "error": f"Symbol {symbol} not whitelisted"}
+        if usd_amount > MAX_USD_PER_TRADE:
+            return {"success": False, "error": f"${usd_amount:.2f} exceeds ${MAX_USD_PER_TRADE} cap"}
+        if usd_amount < MIN_USD_PER_TRADE:
+            return {"success": False, "error": f"Min order is ${MIN_USD_PER_TRADE}"}
+
+        buy_order_id = None
+        try:
+            # 1. Place market BUY
+            buy_order = self.client.order_market_buy(
+                symbol=symbol,
+                quoteOrderQty=round(usd_amount, 2),
+            )
+            buy_order_id = buy_order["orderId"]
+            
+            # Get actual fill price and quantity
+            fills = buy_order.get("fills", [])
+            qty = sum(float(f["qty"]) for f in fills)
+            entry_price = (
+                sum(float(f["price"]) * float(f["qty"]) for f in fills) / qty
+                if qty else 0.0
+            )
+            
+            # 2. Calculate SL/TP prices
+            sl_price = entry_price * (1 - sl_pct / 100)
+            tp_price = entry_price * (1 + tp_pct / 100)
+            
+            # Round to 8 decimals (Binance standard)
+            sl_price = round(sl_price, 8)
+            tp_price = round(tp_price, 8)
+            qty_sell = round(qty, 8)
+            
+            # 3. Place OCO order (SELL at SL or TP)
+            try:
+                oco_order = self.client.create_oco_order(
+                    symbol=symbol,
+                    side="SELL",
+                    quantity=qty_sell,
+                    price=tp_price,              # Limit price for TP (sell at this or better)
+                    stopPrice=sl_price,          # Stop price for SL
+                    stopLimitPrice=round(sl_price * 0.999, 8),  # Slightly below to ensure fill
+                    stopLimitTimeInForce="GTC",
+                )
+                oco_order_id = oco_order.get("orderListId")
+                
+                logger.info(f"SL/TP: {symbol} BUY @ ${entry_price:.2f} qty={qty}, "
+                           f"SL=${sl_price:.2f}, TP=${tp_price:.2f}")
+                
+                return {
+                    "success": True,
+                    "buy_order_id": buy_order_id,
+                    "oco_order_id": oco_order_id,
+                    "symbol": symbol,
+                    "qty": qty,
+                    "entry_price": entry_price,
+                    "sl_price": sl_price,
+                    "tp_price": tp_price,
+                    "sl_pct": sl_pct,
+                    "tp_pct": tp_pct,
+                }
+            except BinanceAPIException as oco_err:
+                # BUY succeeded but OCO failed — warn but return partial success
+                logger.error(f"OCO failed for {symbol} (buy succeeded): {oco_err.message}")
+                return {
+                    "success": False,
+                    "error": f"OCO failed: {oco_err.message}. Buy succeeded (order {buy_order_id}), but no SL/TP. MANUAL CONTROL REQUIRED.",
+                    "buy_order_id": buy_order_id,
+                }
+        except BinanceAPIException as e:
+            logger.error(f"market_buy_with_sl_tp({symbol}): {e.message}")
+            return {"success": False, "error": e.message}
+        except Exception as e:
+            logger.error(f"market_buy_with_sl_tp({symbol}): {str(e)}")
+            return {"success": False, "error": str(e)}
+
 
 # ─── CONVENIENCE FACTORY ─────────────────────────────────────────────────────
 def get_client_for_user(uid: str) -> Optional[BinanceClient]:

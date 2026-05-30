@@ -739,7 +739,8 @@ def screen_filled(side, symbol, uid):
                 if usdt < size:
                     return (f"❌ Need {fmt_usd(size)} USDT, have {fmt_usd(usdt)}.",
                             kb([("⬅️ Back", "td_manual")]))
-                r = c.place_market_buy(symbol, size)
+                # Use SL/TP for BUY orders
+                r = c.place_market_buy_with_sl_tp(symbol, size, sl_pct=STOP_LOSS_PCT, tp_pct=TAKE_PROFIT_PCT)
             else:
                 asset = to_binance_symbol(symbol).replace("USDT", "")
                 qty = c.get_balance(asset)
@@ -750,24 +751,52 @@ def screen_filled(side, symbol, uid):
             if not r.get("success"):
                 return (explain_binance_error(str(r.get("error"))),
                         kb([("📋 History", "td_history"), ("⬅️ Back", "td_manual")]))
-            _save_trade(uid, r["symbol"], side, "LIVE",
-                        binance_order_id=r["order_id"],
-                        entry_price=r["fill_price"], qty=r["qty"],
-                        status="OPEN" if side == "buy" else "CLOSED")
-            notify_admin_async(
-                f"🔴 *LIVE Binance trade*\n"
-                f"User: `{uid}`\n{('🟢' if side=='buy' else '🔴')} {side.upper()} `{r['symbol']}`\n"
-                f"Fill: {fmt_usd(r['fill_price'])} · Qty: {r['qty']:.6f}"
-            )
-            return (
-                "✅ *LIVE Order Filled!*\n\n"
-                f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
-                f"Fill: `{fmt_usd(r['fill_price'])}`\n"
-                f"Qty:  `{r['qty']:.6f}`\n"
-                f"ID:   `{r['order_id']}`\n\n"
-                f"🛡 Target SL −{STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%",
-                kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
-            )
+            
+            # For BUY with SL/TP: save both buy and OCO orders
+            if side == "buy" and r.get("oco_order_id"):
+                _save_trade(uid, r["symbol"], side, "LIVE",
+                            binance_order_id=r["buy_order_id"],
+                            entry_price=r["entry_price"], qty=r["qty"],
+                            status="OPEN",
+                            sl_price=r["sl_price"], tp_price=r["tp_price"],
+                            oco_order_id=r["oco_order_id"])
+                notify_admin_async(
+                    f"🔴 *LIVE Binance trade (with SL/TP)*\n"
+                    f"User: `{uid}`\n🟢 BUY `{r['symbol']}`\n"
+                    f"Entry: {fmt_usd(r['entry_price'])} · Qty: {r['qty']:.6f}\n"
+                    f"SL: {fmt_usd(r['sl_price'])} | TP: {fmt_usd(r['tp_price'])}"
+                )
+                return (
+                    "✅ *LIVE Order Filled with SL/TP!*\n\n"
+                    f"🟢 BUY `{r['symbol']}`\n"
+                    f"Entry: `{fmt_usd(r['entry_price'])}`\n"
+                    f"Qty:   `{r['qty']:.6f}`\n"
+                    f"SL:    `{fmt_usd(r['sl_price'])}` (−{STOP_LOSS_PCT}%)\n"
+                    f"TP:    `{fmt_usd(r['tp_price'])}` (+{TAKE_PROFIT_PCT}%)\n\n"
+                    f"📋 SL/TP will auto-execute when price hits either level.",
+                    kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+                )
+            # For SELL or SL/TP failed: use old logic
+            else:
+                _save_trade(uid, r["symbol"], side, "LIVE",
+                            binance_order_id=r["order_id"] if side=="sell" else r.get("buy_order_id"),
+                            entry_price=r["fill_price"] if side=="sell" else r.get("entry_price", 0), 
+                            qty=r["qty"],
+                            status="OPEN" if side == "buy" else "CLOSED")
+                notify_admin_async(
+                    f"🔴 *LIVE Binance trade*\n"
+                    f"User: `{uid}`\n{('🟢' if side=='buy' else '🔴')} {side.upper()} `{r['symbol']}`\n"
+                    f"Fill: {fmt_usd(r.get('fill_price') or r.get('entry_price', 0))} · Qty: {r['qty']:.6f}"
+                )
+                return (
+                    "✅ *LIVE Order Filled!*\n\n"
+                    f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
+                    f"Fill: `{fmt_usd(r.get('fill_price') or r.get('entry_price', 0))}`\n"
+                    f"Qty:  `{r['qty']:.6f}`\n"
+                    f"ID:   `{r.get('order_id') or r.get('buy_order_id')}`\n\n"
+                    f"🛡 Target SL −{STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%",
+                    kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+                )
         else:
             _save_trade(uid, symbol, side, "PAPER")
             return (
@@ -788,7 +817,8 @@ def screen_filled(side, symbol, uid):
         if side == "buy":
             cash = c.get_cash()
             size = alpaca_trade_size(cash)
-            r = c.place_market_buy(symbol, size)
+            # Use SL/TP bracket orders for BUY
+            r = c.place_market_buy_with_sl_tp(symbol, size, sl_pct=STOP_LOSS_PCT, tp_pct=TAKE_PROFIT_PCT)
         else:
             r = c.place_market_sell(symbol)
         if not r.get("success"):
@@ -803,23 +833,55 @@ def screen_filled(side, symbol, uid):
             else:
                 msg = f"❌ *Alpaca Order Failed*\n\n`{err}`"
             return (msg, kb([("📋 History", "td_history"), ("⬅️ Back", "td_manual")]))
-        _save_trade(uid, r["symbol"], side, "ALPACA",
-                    alpaca_order_id=r.get("order_id"),
-                    entry_price=r.get("fill_price", 0), qty=r.get("qty", 0),
-                    status="OPEN" if side == "buy" else "CLOSED")
+        
+        # Save trade with SL/TP for BUY
+        if side == "buy" and r.get("sl_price"):
+            _save_trade(uid, r["symbol"], side, "ALPACA",
+                        alpaca_order_id=r.get("buy_order_id"),
+                        entry_price=r.get("entry_price", 0), qty=r.get("qty", 0),
+                        status="OPEN",
+                        sl_price=r["sl_price"], tp_price=r["tp_price"])
+        else:
+            _save_trade(uid, r["symbol"], side, "ALPACA",
+                        alpaca_order_id=r.get("order_id") or r.get("buy_order_id"),
+                        entry_price=r.get("fill_price") or r.get("entry_price", 0), 
+                        qty=r.get("qty", 0),
+                        status="OPEN" if side == "buy" else "CLOSED")
+        
         if not paper:
-            notify_admin_async(
-                f"🔴 *LIVE Alpaca trade*\nUser: `{uid}`\n"
-                f"{('🟢' if side=='buy' else '🔴')} {side.upper()} `{r['symbol']}`"
+            if side == "buy" and r.get("sl_price"):
+                notify_admin_async(
+                    f"🔴 *LIVE Alpaca trade (with SL/TP)*\n"
+                    f"User: `{uid}`\n🟢 BUY `{r['symbol']}`\n"
+                    f"Entry: {fmt_usd(r['entry_price'])} · Qty: {r['qty']:.2f}\n"
+                    f"SL: {fmt_usd(r['sl_price'])} | TP: {fmt_usd(r['tp_price'])}"
+                )
+            else:
+                notify_admin_async(
+                    f"🔴 *LIVE Alpaca trade*\nUser: `{uid}`\n"
+                    f"{('🟢' if side=='buy' else '🔴')} {side.upper()} `{r['symbol']}`"
+                )
+        
+        if side == "buy" and r.get("sl_price"):
+            return (
+                f"✅ *Alpaca Order Placed with SL/TP* {'(practice)' if paper else '(LIVE)'}\n\n"
+                f"🟢 BUY `{r['symbol']}`\n"
+                f"Entry: `{fmt_usd(r['entry_price'])}`\n"
+                f"Qty:   `{r['qty']:.2f}`\n"
+                f"SL:    `{fmt_usd(r['sl_price'])}` (−{STOP_LOSS_PCT}%)\n"
+                f"TP:    `{fmt_usd(r['tp_price'])}` (+{TAKE_PROFIT_PCT}%)\n\n"
+                f"📋 SL/TP will auto-execute when price hits either level.",
+                kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
             )
-        return (
-            f"✅ *Alpaca Order Placed* {'(practice)' if paper else '(LIVE)'}\n\n"
-            f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
-            f"Order ID: `{r.get('order_id','—')}`\n"
-            f"Time: `{ts_now()}`\n\n"
-            f"🛡 Target SL −{STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%",
-            kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
-        )
+        else:
+            return (
+                f"✅ *Alpaca Order Placed* {'(practice)' if paper else '(LIVE)'}\n\n"
+                f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{r['symbol']}`\n"
+                f"Order ID: `{r.get('order_id') or r.get('buy_order_id', '—')}`\n"
+                f"Time: `{ts_now()}`\n\n"
+                f"🛡 Target SL −{STOP_LOSS_PCT}% / TP +{TAKE_PROFIT_PCT}%",
+                kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+            )
     else:
         return ("⚠️ Unknown symbol.", kb([("⬅️ Back", "td_manual")]))
 

@@ -21,8 +21,8 @@ from typing import Optional, Tuple, Dict
 
 try:
     from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import MarketOrderRequest
-    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockLatestTradeRequest
     ALPACA_AVAILABLE = True
@@ -142,6 +142,88 @@ class AlpacaClient:
                 "fill_price": self.get_price(symbol),
             }
         except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def place_market_buy_with_sl_tp(self, symbol: str, usd_amount: float,
+                                     sl_pct: float = 0.5, tp_pct: float = 3.0) -> dict:
+        """
+        Place market BUY with automatic SL/TP using Alpaca bracket orders.
+        
+        Alpaca's bracket orders automatically create protective orders:
+          - take_profit: sell at this price (TP)
+          - stop_loss: sell at this price (SL)
+        
+        When either is hit, the other is automatically cancelled.
+        
+        Returns:
+          {
+            "success": True,
+            "buy_order_id": str,
+            "symbol": str,
+            "qty": float,
+            "entry_price": float,
+            "sl_price": float,
+            "tp_price": float,
+            "sl_pct": float,
+            "tp_pct": float
+          }
+          OR
+          {
+            "success": False,
+            "error": str
+          }
+        """
+        if symbol not in ALLOWED_SYMBOLS:
+            return {"success": False, "error": f"{symbol} not whitelisted"}
+        if usd_amount > MAX_USD_PER_TRADE:
+            return {"success": False, "error": f"${usd_amount:.2f} exceeds ${MAX_USD_PER_TRADE} cap"}
+        if usd_amount < MIN_USD_PER_TRADE:
+            return {"success": False, "error": f"Min order ${MIN_USD_PER_TRADE}"}
+
+        try:
+            # Get current price to calculate qty and SL/TP
+            entry_price = self.get_price(symbol)
+            if not entry_price or entry_price <= 0:
+                return {"success": False, "error": f"Cannot get price for {symbol}"}
+            
+            qty = round(usd_amount / entry_price, 2)
+            
+            # Calculate SL/TP prices
+            sl_price = round(entry_price * (1 - sl_pct / 100), 2)
+            tp_price = round(entry_price * (1 + tp_pct / 100), 2)
+            
+            # Create bracket order with take_profit and stop_loss
+            # Alpaca will automatically create the protective orders
+            from alpaca.trading.requests import MarketOrderRequest, TakeProfitRequest, StopLossRequest
+            
+            req = MarketOrderRequest(
+                symbol=symbol,
+                qty=qty,
+                side=OrderSide.BUY,
+                time_in_force=TimeInForce.DAY,
+                order_class=OrderClass.BRACKET,
+                take_profit=TakeProfitRequest(limit_price=tp_price),
+                stop_loss=StopLossRequest(stop_price=sl_price),
+            )
+            
+            order = self.trading.submit_order(req)
+            
+            logger.info(f"SL/TP: {symbol} BUY @ ${entry_price} qty={qty}, "
+                       f"SL=${sl_price}, TP=${tp_price}")
+            
+            return {
+                "success": True,
+                "buy_order_id": str(order.id),
+                "symbol": symbol,
+                "qty": qty,
+                "entry_price": entry_price,
+                "sl_price": sl_price,
+                "tp_price": tp_price,
+                "sl_pct": sl_pct,
+                "tp_pct": tp_pct,
+            }
+        except Exception as e:
+            logger.error(f"alpaca buy_with_sl_tp({symbol}): {e}")
             return {"success": False, "error": str(e)}
 
 
