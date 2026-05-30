@@ -46,6 +46,19 @@ try:
 except ImportError:
     ALPACA_LOADED = False
 
+# ─── OANDA ──────────────────────────────────────────────────────────────────
+try:
+    from oanda_client import (
+        get_client_for_user as get_oanda_client,
+        has_oanda, INSTRUMENTS, INSTRUMENT_DISPLAY, INSTRUMENT_GROUPS,
+    )
+    OANDA_LOADED = True
+except ImportError:
+    OANDA_LOADED = False
+    INSTRUMENTS = {}
+    INSTRUMENT_DISPLAY = {}
+    INSTRUMENT_GROUPS = {}
+
 # ─── Strategy Lab (OpenAsset Internal) ──────────────────────────────────────
 try:
     from openasset_engine import (
@@ -86,7 +99,7 @@ TRADING_CALLBACK_PATTERN = (
     r"td_stats|td_settings|td_psychology|td_pause_|td_resume_|td_stopall|"
     r"mt_|exec_buy_|exec_sell_|confirm_buy_|confirm_sell_|"
     r"settings_notif|settings_verify|settings_toggle_mode|settings_confirm_live|"
-    r"oa_|back_home)"
+    r"oa_|ox_|back_home)"
 )
 
 CRYPTO_SYMBOLS = {"BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD"}
@@ -337,7 +350,8 @@ def screen_manual():
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "🔴 *LIVE TRADING* — real money\n"
         "├ Binance:  crypto (BTC, ETH, BNB, SOL)\n"
-        "└ Alpaca:   stocks (SPY, QQQ, GLD, USO)\n\n"
+        "├ Alpaca:   stocks (SPY, QQQ, GLD, USO)\n"
+        "└ OANDA:    forex (EUR/USD, GBP/USD, Gold, Indices)\n\n"
         "🏛 *STRATEGY LAB* — practice, $10k balance\n"
         "└ All asset classes, real prices, real SL/TP\n\n"
         "Pick a venue:"
@@ -347,6 +361,7 @@ def screen_manual():
         [("🔶 Binance — BNB", "mt_BNBUSD"), ("🔶 Binance — SOL", "mt_SOLUSD")],
         [("📊 Alpaca — SPY",   "mt_SPY"),    ("📊 Alpaca — QQQ",  "mt_QQQ")],
         [("📊 Alpaca — GLD",   "mt_GLD"),    ("📊 Alpaca — USO",  "mt_USO")],
+        [("💱 OANDA Forex →",  "ox_menu")],
         [("🏛 Open Strategy Lab", "oa_menu")],
         [("⬅️ Dashboard", "td_home")],
     )
@@ -886,6 +901,135 @@ def screen_filled(side, symbol, uid):
         return ("⚠️ Unknown symbol.", kb([("⬅️ Back", "td_manual")]))
 
 
+
+# ─── OANDA FOREX SCREENS ────────────────────────────────────────────────────────
+def screen_oanda_menu(uid):
+    """OANDA forex/metals/indices venue selection."""
+    if not OANDA_LOADED:
+        return ("⚠️ OANDA client not loaded.", kb([("⬅️ Back", "td_manual")]))
+    if not has_oanda(uid):
+        return (
+            "🔗 *Connect OANDA First*\n\n"
+            "1. Create account at oanda.com\n"
+            "2. Get API token from dashboard\n"
+            "3. /trading → Trading Menu → OANDA\n"
+            "4. Paste token + account ID",
+            kb([("🔗 Connect", "trading_menu"), ("⬅️ Back", "td_manual")]),
+        )
+    text = (
+        "💱 *OANDA Forex & Metals*\n\n"
+        "Pick an asset class:"
+    )
+    keyboard = kb(
+        [("🌍 Forex Majors", "ox_class_forex_major")],
+        [("🌏 Forex Minors", "ox_class_forex_minor")],
+        [("🥇 Metals", "ox_class_metals")],
+        [("📈 Indices", "ox_class_indices")],
+        [("⛽ Energy", "ox_class_energy")],
+        [("⬅️ Back", "td_manual")],
+    )
+    return text, keyboard
+
+
+def screen_oanda_class(uid, group: str):
+    """Show instruments for a specific group (forex_major, metals, etc.)."""
+    if not OANDA_LOADED or not INSTRUMENT_GROUPS.get(group):
+        return ("⚠️ Invalid group.", kb([("⬅️ Back", "ox_menu")]))
+    
+    symbols = INSTRUMENT_GROUPS[group]
+    group_name = group.replace("_", " ").title()
+    text = f"💱 *{group_name}*\n\nPick a pair:"
+    rows = []
+    for sym in symbols:
+        display = INSTRUMENT_DISPLAY.get(sym, sym)
+        rows.append((f"📊 {display}", f"ox_detail_{sym}"))
+    rows.append(("⬅️ Back", "ox_menu"))
+    keyboard = kb(*[[r] for r in rows])
+    return text, keyboard
+
+
+def screen_oanda_detail(uid, symbol: str):
+    """Show OANDA pair price and BUY/SELL options."""
+    if not OANDA_LOADED or symbol not in INSTRUMENTS:
+        return ("⚠️ Invalid symbol.", kb([("⬅️ Back", "ox_menu")]))
+    
+    c, is_practice = get_oanda_client(uid)
+    if not c:
+        return ("⚠️ OANDA connection failed.", kb([("⬅️ Back", "ox_menu")]))
+    
+    bid, ask = c.get_price(symbol)
+    if bid <= 0 or ask <= 0:
+        return (f"❌ Cannot fetch price for {symbol}.", kb([("⬅️ Back", "ox_menu")]))
+    
+    mid = (bid + ask) / 2
+    env = "PRACTICE" if is_practice else "LIVE"
+    display = INSTRUMENT_DISPLAY.get(symbol, symbol)
+    
+    text = (
+        f"💱 *{display}*\n"
+        f"`{env} · OANDA`\n\n"
+        f"💵 Bid: `${bid:.5f}`\n"
+        f"💵 Ask: `${ask:.5f}`\n"
+        f"📊 Mid: `${mid:.5f}`\n\n"
+        f"Trade size: $`50.00` (1% of capital)"
+    )
+    keyboard = kb(
+        [("🟢 BUY", f"ox_buy_{symbol}"), ("🔴 SELL", f"ox_sell_{symbol}")],
+        [("⬅️ Back", "ox_menu")],
+    )
+    return text, keyboard
+
+
+def screen_oanda_filled(uid, side: str, symbol: str):
+    """Execute OANDA trade."""
+    if not OANDA_LOADED or symbol not in INSTRUMENTS:
+        return ("⚠️ Invalid symbol.", kb([("⬅️ Back", "ox_menu")]))
+    
+    c, is_practice = get_oanda_client(uid)
+    if not c:
+        return ("⚠️ OANDA connection failed.", kb([("⬅️ Back", "ox_menu")]))
+    
+    display = INSTRUMENT_DISPLAY.get(symbol, symbol)
+    env = "PRACTICE" if is_practice else "LIVE"
+    
+    try:
+        if side == "buy":
+            r = c.place_market_buy(symbol, 50.0)  # $50 USD notional
+        else:
+            r = c.close_trade(symbol)
+        
+        if not r.get("success"):
+            return (f"❌ *Order Failed*\n\n`{r.get('error')}`",
+                    kb([("📋 History", "td_history"), ("⬅️ Back", "ox_menu")]))
+        
+        # Save trade record
+        _save_trade(uid, symbol, side, "OANDA",
+                   oanda_trade_id=r.get("trade_id"),
+                   entry_price=r.get("fill_price", 0),
+                   qty=r.get("units", 0),
+                   status="OPEN" if side == "buy" else "CLOSED")
+        
+        # Notify admin on LIVE trades
+        if not is_practice:
+            notify_admin_async(
+                f"💱 *LIVE OANDA trade*\n"
+                f"User: `{uid}`\n"
+                f"{('🟢' if side=='buy' else '🔴')} {side.upper()} `{display}`"
+            )
+        
+        return (
+            f"✅ *OANDA Order Placed* ({env})\n\n"
+            f"{'🟢' if side=='buy' else '🔴'} {side.upper()} `{display}`\n"
+            f"Fill: `${r.get('fill_price', '—'):.5f}`\n"
+            f"Units: `{r.get('units', '—')}`\n"
+            f"ID: `{r.get('trade_id', '—')}`",
+            kb([("📋 History", "td_history"), ("🏠 Dashboard", "td_home")]),
+        )
+    except Exception as e:
+        return (f"❌ *Error*\n\n`{str(e)}`",
+                kb([("⬅️ Back", "ox_menu")]))
+
+
 # ─── STRATEGY LAB SCREENS ────────────────────────────────────────────────────
 def screen_oa_menu(uid):
     if not STRATLAB_LOADED:
@@ -1233,6 +1377,13 @@ async def handle_trading_callbacks(update, ctx):
     elif data.startswith("oa_s_"):  text, keyboard = screen_oa_confirm("sell", data[5:], uid)
     elif data.startswith("oa_fb_"): text, keyboard = screen_oa_fill("buy", data[6:], uid)
     elif data.startswith("oa_fs_"): text, keyboard = screen_oa_fill("sell", data[6:], uid)
+
+    # OANDA Forex
+    elif data == "ox_menu":          text, keyboard = screen_oanda_menu(uid)
+    elif data.startswith("ox_class_"): text, keyboard = screen_oanda_class(uid, data[8:])
+    elif data.startswith("ox_detail_"): text, keyboard = screen_oanda_detail(uid, data[10:])
+    elif data.startswith("ox_buy_"):   text, keyboard = screen_oanda_filled(uid, "buy", data[7:])
+    elif data.startswith("ox_sell_"):  text, keyboard = screen_oanda_filled(uid, "sell", data[8:])
 
     if text is None:
         return  # not ours
