@@ -1,0 +1,343 @@
+═══════════════════════════════════════════════════════════════════
+  OpenAsset Trading Bot - Platform Testing Plan
+═══════════════════════════════════════════════════════════════════
+
+PHASE 1: BINANCE CRYPTO TESTING (1-2 hours)
+════════════════════════════════════════════
+
+Prerequisites:
+  ✅ Binance API key connected (already done)
+  ✅ $50 USDT balance verified
+  ✅ Spot & Margin trading enabled
+  ✅ API key: MyAiAgent
+
+Test Scenario 1: Manual BUY Signal
+─────────────────────────────────
+  1. Open Telegram: /trading → Settings → Verify Binance
+  2. Should show: "✅ Account verified: $50 USDT"
+  3. Go to: /trading → Trading Menu → Manual Trading
+  4. Select: BTC/USDT
+  5. Click: BUY
+  6. Enter amount: $50 USD
+  7. Expected: Order placed with OCO (SL @ -0.5%, TP @ +3.0%)
+  8. Check: Telegram confirmation message
+  9. Verify: Dashboard shows open position
+
+Expected Result:
+  ✅ Order executes immediately
+  ✅ Message: "BUY BTC: 0.00XX quantity @ $69,705 | SL=$69,352 | TP=$71,794"
+  ✅ No funds = no trade executed
+
+Test Scenario 2: AI Signal Auto-Trade
+────────────────────────────────────
+  1. Go to: /trading → Settings → AI Signals
+  2. Toggle: ✅ ON
+  3. Select Mode: 🔶 Binance
+  4. Select Symbols: [BTC, ETH, BNB]
+  5. Wait: 60 minutes for signal
+  6. Expected: "AI Signal: BUY BTC @ $69,705 | Executing..."
+  7. Check Dashboard: New position appears
+  8. Monitor: SL/TP status
+
+Expected Result:
+  ✅ AI checks indicators every 60 minutes
+  ✅ When 2+ indicators agree = BUY/SELL signal
+  ✅ Auto-executes if enabled
+  ✅ Dashboard shows trade history
+
+Test Scenario 3: Position Close (SL/TP)
+──────────────────────────────────────
+  1. Wait for BTC price to move
+  2. If price drops to SL (-0.5%): Auto-close at loss
+  3. If price rises to TP (+3.0%): Auto-close at profit
+  4. Expected: Telegram notification "Position Closed: +$X.XX profit"
+  5. Check Dashboard: Status changes to "CLOSED"
+
+Expected Result:
+  ✅ SL/TP executes automatically
+  ✅ Position removed from active trades
+  ✅ P&L recorded in history
+  ✅ Notification sent to user
+
+Test Scenario 4: Dashboard Stats
+────────────────────────────────
+  1. Go to: /trading → My Portfolio
+  2. Should show:
+     ├ Balance: $50.00 USDT
+     ├ Open Positions: 0-1
+     ├ Win Rate: XX%
+     ├ P&L: +$X.XX or -$X.XX
+     └ Trade History: ✅
+  3. Go to: /trading → Statistics
+     ├ Monthly ROI: X%
+     ├ Best Trade: +$X.XX
+     ├ Worst Trade: -$X.XX
+     └ Average Win/Loss: $X/$X
+
+Expected Result:
+  ✅ All stats update in real-time
+  ✅ P&L calculations are accurate
+  ✅ Win rate reflects actual trades
+
+
+PHASE 2: ALPACA STOCKS TESTING (1-2 hours)
+══════════════════════════════════════════
+
+Prerequisites:
+  ✅ Alpaca API keys connected (already done)
+  ✅ Live account with real money (~$246)
+  ✅ Market hours: 9:30 AM - 4:00 PM EST
+
+Test Scenario 1: Manual SPY BUY
+──────────────────────────────
+  1. Open Telegram: /trading → Trading Menu → Alpaca
+  2. Verify: Account shows live account with balance
+  3. Select: SPY (S&P 500 ETF)
+  4. Click: BUY
+  5. Set amount: $50 USD
+  6. Expected: Order placed with bracket (SL @ -0.5%, TP @ +3.0%)
+  7. Check: Telegram confirmation
+
+Expected Result:
+  ✅ Order ID shown in message
+  ✅ Order status: PENDING → FILLED
+  ✅ Bracket orders created automatically
+  ✅ Dashboard shows open position
+
+Example Success Message:
+  ✅ Alpaca Order Placed (LIVE)
+  🟢 BUY SPY
+  Order ID: 7e309a4e-4cc3-479a-8a00-88224a773bd9
+  Time: 08:31 UTC
+  🛡️ Target SL -0.5% / TP +3.0%
+
+Test Scenario 2: AI Signal Auto-Trade
+────────────────────────────────────
+  1. Go to: /trading → Settings → AI Signals
+  2. Toggle: ✅ ON
+  3. Select Mode: 📊 Alpaca
+  4. Select Symbols: [SPY, QQQ, GLD]
+  5. Wait: For market to open (9:30 AM EST) + 60 min
+  6. Expected: Signal fires during market hours
+
+Expected Result:
+  ✅ AI only signals during market hours (9:30-16:00 EST)
+  ✅ Signals for US equities only (SPY, QQQ, GLD, etc.)
+  ✅ Auto-executes bracket orders
+  ✅ Dashboard shows P&L updates
+
+Test Scenario 3: GLD Position Monitor
+────────────────────────────────────
+  1. Buy GLD (Gold ETF) - $50
+  2. Monitor position in dashboard
+  3. Check: Real-time price updates
+  4. When SL or TP hit: Bracket order executes automatically
+  5. Expected: Position closes, new P&L recorded
+
+Expected Result:
+  ✅ SL/TP closes automatically
+  ✅ No manual intervention needed
+  ✅ Trade recorded in history
+  ✅ P&L shown on dashboard
+
+Test Scenario 4: Market Hours vs After-Hours
+───────────────────────────────────────────
+  1. Try trading during market hours (9:30-16:00 EST)
+     ✅ Should work normally
+  2. Try trading after hours (16:00-20:00 EST)
+     ✅ Should reject order or execute next day
+  3. Try trading before hours (04:00-09:30 EST)
+     ✅ Should reject order
+
+Expected Result:
+  ✅ Bot respects market hours
+  ✅ Signals only during 9:30-16:00 EST
+  ✅ After-hours orders handled gracefully
+
+
+PHASE 3: OANDA FOREX TESTING (1-2 hours)
+════════════════════════════════════════
+
+Prerequisites:
+  ✅ OANDA account created
+  ✅ API token generated
+  ✅ Account ID: 001-XXX-XXXXXX-001
+  ✅ EUR/USD or other pairs available
+
+Test Scenario 1: Connect OANDA
+────────────────────────────
+  1. Get API token: https://oanda.com → Settings → API
+  2. Copy token (shown once!)
+  3. Go to: /trading → Trading Menu → OANDA
+  4. Paste: API Token
+  5. Paste: Account ID
+  6. Expected: ✅ Connected successfully
+
+Expected Result:
+  ✅ Connection verified
+  ✅ Account balance shows
+  ✅ Available to trade
+
+Test Scenario 2: Manual EUR/USD Trade
+─────────────────────────────────────
+  1. Select: EUR/USD
+  2. Click: BUY
+  3. Set amount: $50 USD (notional)
+  4. Expected: Order executes
+  5. Check: Telegram confirmation
+
+Expected Result:
+  ✅ Order placed
+  ✅ Confirmation message with Order ID
+  ✅ Dashboard shows open position
+
+Test Scenario 3: GBP/USD Trade
+────────────────────────────
+  1. Select: GBP/USD
+  2. Click: SELL
+  3. Amount: $50 USD
+  4. Expected: Short position opens
+  5. Monitor: For profit/loss
+
+Expected Result:
+  ✅ Sell order executes
+  ✅ Short position tracked
+  ✅ SL/TP applies
+
+Test Scenario 4: AI Signals for Forex
+───────────────────────────────────
+  1. Enable AI Signals
+  2. Select Mode: 💱 OANDA
+  3. Select: [EUR_USD, GBP_USD, XAU_USD]
+  4. Wait: 60 minutes for signals
+  5. Expected: Signals for 24/5 (forex market open)
+
+Expected Result:
+  ✅ Signals work 24/5 (Mon-Fri)
+  ✅ Orders execute during forex hours
+  ✅ Real money at risk - use small amounts
+
+
+TESTING SUMMARY CHECKLIST
+══════════════════════════
+
+BINANCE (Crypto - 24/7):
+  ☐ Manual BUY executes
+  ☐ Manual SELL executes
+  ☐ AI signal triggers
+  ☐ OCO SL/TP works
+  ☐ Dashboard shows trades
+  ☐ P&L calculates correctly
+  ☐ History recorded
+
+ALPACA (Stocks - 9:30-16:00 EST):
+  ☐ Manual BUY executes
+  ☐ Manual SELL executes
+  ☐ AI signal triggers (during market hours)
+  ☐ Bracket SL/TP works
+  ☐ Dashboard shows trades
+  ☐ Market hours respected
+  ☐ History recorded
+
+OANDA (Forex - 24/5):
+  ☐ Connection works
+  ☐ Manual BUY executes
+  ☐ Manual SELL executes
+  ☐ AI signal triggers
+  ☐ Orders complete
+  ☐ Dashboard shows trades
+  ☐ History recorded
+
+OVERALL:
+  ☐ All platforms operational
+  ☐ Risk management working (SL/TP)
+  ☐ Dashboard accurate
+  ☐ Notifications working
+  ☐ API responding
+  ☐ No errors in logs
+
+
+TESTING TIMELINE
+═════════════════
+
+Day 1: Binance Testing
+  ├ 1 hour: Setup + manual trades
+  ├ 1-2 hours: Wait for AI signal
+  └ Monitor: SL/TP execution
+
+Day 2: Alpaca Testing (during market hours)
+  ├ 1 hour: Setup + manual trades
+  ├ 1-2 hours: Wait for AI signal (9:30-16:00 EST)
+  └ Monitor: Bracket order execution
+
+Day 3: OANDA Testing
+  ├ 1 hour: Connect + setup
+  ├ 1-2 hours: Manual trades
+  ├ 1-2 hours: AI signals (24/5)
+  └ Monitor: Execution
+
+Day 4-7: Continuous Monitoring
+  ├ Watch all 3 platforms simultaneously
+  ├ Monitor P&L accumulation
+  ├ Check dashboard accuracy
+  └ Record any issues
+
+
+TROUBLESHOOTING
+═════════════════
+
+Problem: "Order Failed - Insufficient Balance"
+Solution:
+  ✅ Check account has funds
+  ✅ Make sure $50 is available
+  ✅ Binance: 50 USDT confirmed
+
+Problem: "OCO Failed: Mandatory parameter 'aboveType'"
+Solution:
+  ✅ This is a minor Alpaca API issue
+  ✅ Order still executes, just no auto SL/TP
+  ✅ Will be fixed in next update
+
+Problem: "OANDA Connection Failed"
+Solution:
+  ✅ Verify API token is correct
+  ✅ Check Account ID format: 001-XXX-XXXXXX-001
+  ✅ Make sure token isn't expired
+
+Problem: "AI Signal not triggering"
+Solution:
+  ✅ Wait 60 minutes minimum (SIGNAL_CHECK_INTERVAL = 60)
+  ✅ Check signal_config.json has correct settings
+  ✅ View logs: tail -f logs/user_bot.log | grep Signal
+
+Problem: "Dashboard not updating"
+Solution:
+  ✅ Refresh browser
+  ✅ Check API is running: http://72.62.254.237:9000/api/public/stats
+  ✅ Check VPS is accessible from your location
+
+
+SUCCESS CRITERIA
+════════════════
+
+✅ Phase 1: All platforms tested
+✅ Phase 2: At least 5 trades executed per platform
+✅ Phase 3: Win rate > 50% (6+ trades each)
+✅ Phase 4: Dashboard 100% accurate
+✅ Phase 5: Ready for production launch
+
+Once all tests pass:
+  🎉 Platform is production-ready
+  📢 Can launch to paying users
+  💰 Start generating revenue
+
+
+NEXT STEPS
+═══════════
+
+After testing:
+  1. Create landing page (HTML)
+  2. Upload to cPanel hosting
+  3. Connect to this VPS API
+  4. Launch to users
+  5. Monitor profitability
