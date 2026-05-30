@@ -99,7 +99,7 @@ TRADING_CALLBACK_PATTERN = (
     r"td_stats|td_settings|td_psychology|td_pause_|td_resume_|td_stopall|"
     r"mt_|exec_buy_|exec_sell_|confirm_buy_|confirm_sell_|"
     r"settings_notif|settings_verify|settings_toggle_mode|settings_confirm_live|"
-    r"oa_|ox_|back_home)"
+    r"oa_|ox_|ai_|back_home)"
 )
 
 CRYPTO_SYMBOLS = {"BTCUSD", "ETHUSD", "BNBUSD", "SOLUSD"}
@@ -575,6 +575,7 @@ def screen_settings(uid):
         [("✅ Verify Binance", "settings_verify")],
         [(toggle, "settings_toggle_mode")],
         [("🔗 Manage APIs", "trading_menu"), ("🔔 Alerts", "settings_notif")],
+        [("🤖 AI Signals", "ai_signals_menu")],
         [("⬅️ Dashboard", "td_home")],
     )
 
@@ -606,6 +607,130 @@ def screen_psychology():
     return text, kb(
         [("🏛 Strategy Lab", "oa_menu"), ("✏️ Manual Trade", "td_manual")],
         [("⬅️ Dashboard", "td_home")],
+    )
+
+
+# ─── AI SIGNAL SCREENS ──────────────────────────────────────────────────────────
+def screen_ai_signals_menu(uid):
+    """Main AI signals configuration screen."""
+    try:
+        from signal_engine import load_signal_config, get_signal_performance
+        config = load_signal_config(uid)
+        perf = get_signal_performance(uid)
+    except ImportError:
+        return (
+            "⚠️ AI Signal Engine not available.",
+            kb([("⬅️ Settings", "td_settings")]),
+        )
+    
+    enabled = config.get("enabled", False)
+    status = "✅ ENABLED" if enabled else "⭕ DISABLED"
+    symbols = config.get("symbols", [])
+    mode = config.get("mode", "stratlab")
+    
+    win_rate = perf.get("rate", 0)
+    total_signals = perf.get("total", 0)
+    
+    text = (
+        "🤖 *AI Signal Engine*\n\n"
+        f"Status: `{status}`\n"
+        f"Mode: `{mode.upper()}`\n"
+        f"Symbols: `{', '.join(symbols) if symbols else 'none'}`\n\n"
+        f"📊 Performance:\n"
+        f"├ Total signals: `{total_signals}`\n"
+        f"├ Win rate: `{win_rate}%`\n"
+        f"└ Winning/losing: `{perf.get('wins')}/{perf.get('losses')}`\n\n"
+        "Indicators:\n"
+        "├ RSI (momentum)\n"
+        "├ MACD (trend)\n"
+        "└ Bollinger Bands (volatility)"
+    )
+    
+    return text, kb(
+        [("✅ Toggle", f"ai_toggle_{not enabled}"), ("⚙️ Settings", "ai_config")],
+        [("📊 History", "ai_history")],
+        [("⬅️ Back", "td_settings")],
+    )
+
+
+def screen_ai_config(uid):
+    """Configure AI signal parameters."""
+    try:
+        from signal_engine import load_signal_config
+        config = load_signal_config(uid)
+    except ImportError:
+        return (
+            "⚠️ AI Signal Engine not available.",
+            kb([("⬅️ Back", "ai_signals_menu")]),
+        )
+    
+    symbols = config.get("symbols", ["BTC", "SPY", "EUR"])
+    pos_size = config.get("position_size", 50.0)
+    sl_pct = config.get("stop_loss_pct", 0.5)
+    tp_pct = config.get("take_profit_pct", 3.0)
+    mode = config.get("mode", "stratlab")
+    
+    text = (
+        "⚙️ *AI Signal Settings*\n\n"
+        f"Position size: `${pos_size:.2f}`\n"
+        f"Stop-loss: `{sl_pct}%`\n"
+        f"Take-profit: `{tp_pct}%`\n"
+        f"Mode: `{mode.upper()}`\n\n"
+        f"Tracked symbols: `{', '.join(symbols)}`\n\n"
+        "_Note: Only available for Strategy Lab. "
+        "Live mode support (Binance/Alpaca) coming in Phase 8._"
+    )
+    
+    return text, kb(
+        [("📊 Change symbols", "ai_symbols"), ("💰 Position size", "ai_position_size")],
+        [("🛑 Stop-loss %", "ai_stop_loss"), ("✅ Take-profit %", "ai_take_profit")],
+        [("⬅️ Back", "ai_signals_menu")],
+    )
+
+
+def screen_ai_symbols(uid):
+    """Change which symbols to track with AI signals."""
+    text = (
+        "📊 *Tracked Symbols*\n\n"
+        "Which assets should AI track for signals?\n\n"
+        "Available:\n"
+        "├ Crypto: BTC, ETH, BNB, SOL\n"
+        "├ Stocks: SPY, QQQ, GLD, USO\n"
+        "└ Forex: EUR, GBP, JPY, GLD, OIL\n\n"
+        "_Currently hardcoded for Phase 7._\n"
+        "_Custom symbols in Phase 8._"
+    )
+    return text, kb(
+        [("⬅️ Back", "ai_config")],
+    )
+
+
+def screen_ai_history(uid):
+    """Show recent AI signal history."""
+    try:
+        from signal_engine import load_signal_stats
+        stats = load_signal_stats(uid)
+    except ImportError:
+        return (
+            "⚠️ Signal history unavailable.",
+            kb([("⬅️ Back", "ai_signals_menu")]),
+        )
+    
+    total = stats.get("total_signals", 0)
+    wins = stats.get("winning_signals", 0)
+    losses = stats.get("losing_signals", 0)
+    last_sym = stats.get("last_signal_symbol", "—")
+    
+    text = (
+        "📈 *Signal History*\n\n"
+        f"Last signal: `{last_sym}`\n"
+        f"Total generated: `{total}`\n"
+        f"Wins: `{wins}` | Losses: `{losses}`\n\n"
+        "_Detailed logs in /database/signal_log.json_"
+    )
+    
+    return text, kb(
+        [("⬅️ Back", "ai_signals_menu")],
     )
 
 
@@ -1384,6 +1509,22 @@ async def handle_trading_callbacks(update, ctx):
     elif data.startswith("ox_detail_"): text, keyboard = screen_oanda_detail(uid, data[10:])
     elif data.startswith("ox_buy_"):   text, keyboard = screen_oanda_filled(uid, "buy", data[7:])
     elif data.startswith("ox_sell_"):  text, keyboard = screen_oanda_filled(uid, "sell", data[8:])
+
+    # AI Signals
+    elif data == "ai_signals_menu":  text, keyboard = screen_ai_signals_menu(uid)
+    elif data == "ai_config":        text, keyboard = screen_ai_config(uid)
+    elif data == "ai_symbols":       text, keyboard = screen_ai_symbols(uid)
+    elif data == "ai_history":       text, keyboard = screen_ai_history(uid)
+    elif data.startswith("ai_toggle_"):
+        enabled = data == "ai_toggle_True"
+        try:
+            from signal_engine import load_signal_config, save_signal_config
+            config = load_signal_config(uid)
+            config["enabled"] = enabled
+            save_signal_config(uid, config)
+            text, keyboard = screen_ai_signals_menu(uid)
+        except Exception as e:
+            text, keyboard = (f"❌ Error: {e}", kb([("⬅️ Back", "ai_signals_menu")]))
 
     if text is None:
         return  # not ours

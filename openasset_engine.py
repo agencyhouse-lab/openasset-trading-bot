@@ -330,6 +330,173 @@ def reset_account(uid: str) -> dict:
     return {"success": True, "starting_cash": STARTING_CASH}
 
 
+# ─── Background Signal Engine (AI auto-trading) ────────────────────────────────
+_signal_thread: Optional[threading.Thread] = None
+_signal_stop = threading.Event()
+SIGNAL_CHECK_INTERVAL = 3600  # 1 hour — check signals hourly
+
+# Signal generator (lazy-loaded)
+_signal_gen = None
+
+def _get_signal_gen():
+    """Lazy-load signal engine on first use."""
+    global _signal_gen
+    if _signal_gen is None:
+        try:
+            from signal_engine import SignalGenerator
+            _signal_gen = SignalGenerator()
+        except ImportError:
+            logger.warning("signal_engine not available")
+            return None
+    return _signal_gen
+
+
+def _signal_loop():
+    """Background thread: generate signals and auto-execute trades."""
+    logger.info("OpenAsset AI Signal Engine: started")
+    sig_gen = _get_signal_gen()
+    if not sig_gen:
+        logger.warning("Signal engine disabled (signal_engine not found)")
+        return
+    
+    while not _signal_stop.is_set():
+        try:
+            with _LOCK:
+                data = _load()
+            
+            # Check each user's signal config
+            for uid, account in data.items():
+                try:
+                    # Load user's signal config
+                    from signal_engine import load_signal_config, load_signal_stats, record_signal
+                    
+                    config = load_signal_config(uid)
+                    if not config.get("enabled"):
+                        continue
+                    
+                    if config.get("mode") != "stratlab":
+                        continue  # only support stratlab for now
+                    
+                    symbols = config.get("symbols", [])
+                    position_size = config.get("position_size", 50.0)
+                    
+                    # Check if user already has max positions
+                    positions = account.get("positions", {})
+                    if len(positions) >= 3:
+                        continue
+                    
+                    # Generate signals for each symbol
+                    for symbol in symbols:
+                        if symbol in positions:
+                            continue  # already holding
+                        
+                        try:
+                            # Fetch last 50 hours of price data
+                            from openasset_feeds import get_historical_prices
+                            prices = get_historical_prices(symbol, period=50)
+                            if not prices or len(prices) < 20:
+                                continue
+                            
+                            # Generate signal
+                            signal = sig_gen.generate_signal(symbol, prices)
+                            if not signal:
+                                continue
+                            
+                            # Only BUY signals for now (long-only)
+                            if signal != "BUY":
+                                continue
+                            
+                            # Check cash
+                            cash = account.get("cash", 0)
+                            if cash < position_size:
+                                continue
+                            
+                            # Execute trade
+                            p = get_price(symbol)
+                            if p <= 0:
+                                continue
+                            
+                            qty = position_size / p
+                            entry = p
+                            
+                            # Update account
+                            account["positions"][symbol] = {
+                                "qty": qty,
+                                "avg_entry": entry,
+                                "side": "LONG",
+                                "opened_at": datetime.now(timezone.utc).isoformat(),
+                                "source": "AI_SIGNAL",
+                            }
+                            
+                            # Set SL/TP
+                            sl_pct = config.get("stop_loss_pct", 0.5)
+                            tp_pct = config.get("take_profit_pct", 3.0)
+                            sl_price = entry * (1 - sl_pct / 100)
+                            tp_price = entry * (1 + tp_pct / 100)
+                            
+                            account["stops"][symbol] = {
+                                "stop_loss": sl_price,
+                                "take_profit": tp_price,
+                                "entry": entry,
+                                "sl_pct": sl_pct,
+                                "tp_pct": tp_pct,
+                            }
+                            
+                            account["cash"] -= position_size
+                            
+                            # Log the signal
+                            account.setdefault("trades", []).append({
+                                "symbol": symbol,
+                                "side": "AI_BUY",
+                                "qty": qty,
+                                "entry": entry,
+                                "sl_price": sl_price,
+                                "tp_price": tp_price,
+                                "ts": datetime.now(timezone.utc).isoformat(),
+                                "source": "AI_SIGNAL",
+                            })
+                            
+                            record_signal(uid, symbol, signal, entry, action="executed")
+                            
+                            logger.info(
+                                f"AI Signal: BUY {symbol} for uid={uid} @ {entry:.4f} "
+                                f"| SL={sl_price:.4f} | TP={tp_price:.4f}"
+                            )
+                        
+                        except Exception as e:
+                            logger.error(f"Signal processing error for {symbol}: {e}")
+                
+                except Exception as e:
+                    logger.error(f"Signal check error for uid={uid}: {e}")
+            
+            # Save all updates atomically
+            with _LOCK:
+                _save(data)
+        
+        except Exception as e:
+            logger.error(f"Signal loop error: {e}", exc_info=True)
+        
+        _signal_stop.wait(SIGNAL_CHECK_INTERVAL)
+
+
+def start_signal_engine() -> bool:
+    """Start the AI signal engine. Idempotent. Returns True if newly started."""
+    global _signal_thread
+    if _signal_thread and _signal_thread.is_alive():
+        return False
+    _signal_stop.clear()
+    _signal_thread = threading.Thread(
+        target=_signal_loop, daemon=True, name="oa_signal_engine"
+    )
+    _signal_thread.start()
+    return True
+
+
+def stop_signal_engine():
+    """Stop the signal engine."""
+    _signal_stop.set()
+
+
 # ─── Background SL/TP monitor ────────────────────────────────────────────────
 _monitor_thread: Optional[threading.Thread] = None
 _monitor_stop = threading.Event()
@@ -412,3 +579,4 @@ def stop_monitor():
 
 # Auto-start on import (runs in daemon thread — safe)
 start_monitor()
+start_signal_engine()

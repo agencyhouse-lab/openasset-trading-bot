@@ -136,6 +136,54 @@ def get_prices(symbols: List[str]) -> Dict[str, float]:
     return {s: get_price(s) for s in symbols}
 
 
+def get_historical_prices(symbol: str, period: int = 50) -> List[float]:
+    """
+    Get recent historical prices for technical analysis.
+    
+    Args:
+        symbol: Trading symbol (e.g., 'BTC', 'SPY', 'EUR')
+        period: Number of hourly candles to fetch (default 50)
+    
+    Returns:
+        List of closing prices (oldest to newest)
+    """
+    symbol = symbol.upper()
+    asset_class, feed_sym, _ = get_symbol_info(symbol)
+    
+    if not asset_class:
+        logger.warning(f"Unknown symbol for history: {symbol}")
+        return []
+    
+    try:
+        if asset_class == "crypto":
+            # CoinGecko historical: last 365 days
+            import requests
+            url = f"https://api.coingecko.com/api/v3/coins/{feed_sym}/market_chart"
+            r = requests.get(
+                url,
+                params={"vs_currency": "usd", "days": str(min(period, 365))},
+                timeout=10
+            )
+            r.raise_for_status()
+            data = r.json()
+            prices = [p[1] for p in data.get("prices", [])]
+            return prices[-period:] if len(prices) > period else prices
+        else:
+            # yfinance historical
+            import yfinance as yf
+            ticker = yf.Ticker(feed_sym)
+            # Fetch 3 months to have plenty of data
+            hist = ticker.history(period="3mo", interval="1h")
+            if hist.empty:
+                return []
+            closes = hist["Close"].tolist()
+            return closes[-period:] if len(closes) > period else closes
+    
+    except Exception as e:
+        logger.error(f"get_historical_prices({symbol}): {e}")
+        return []
+
+
 def _fetch_crypto(coingecko_id: str) -> float:
     """CoinGecko free tier: no key, ~50 calls/min."""
     url = "https://api.coingecko.com/api/v3/simple/price"
